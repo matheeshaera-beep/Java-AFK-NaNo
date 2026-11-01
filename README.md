@@ -1,45 +1,59 @@
 <div align="center">
 
-# Java AFK NaNo 
-**Lightweight, Pure Kotlin Android Minecraft AFK Bot**
+# Java AFK NaNo  
+**Lightweight Android Minecraft Java AFK Bot**
 
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)]()
 [![Language](https://img.shields.io/badge/Language-Kotlin-purple.svg)]()
-[![Size](https://img.shields.io/badge/APK-~15MB-blue.svg)]()
+[![Size](https://img.shields.io/badge/Size-~3MB-blue.svg)]()
 
 </div>
 
 ## Overview
-Java AFK NaNo is the lightweight, battery-optimized edition of Java AFK. Stripped of all embedded runtimes and native JNI dependencies, it offers a blazing-fast, pure Kotlin implementation for users who need reliable AFK capabilities without the overhead of heavy background engines.
+
+Java AFK NaNo is the lightweight edition of Java AFK. It is built for users who want a simple, low-usage AFK bot without the heavier embedded Node.js runtime.
 
 ## Core Capabilities
-- **Zero Native Dependencies:** No embedded Node.js, V8, or Go binaries.
-- **Pure Kotlin Stack:** Modern, idiomatic Android development using Coroutines.
-- **Ultra-Low Overhead:** Minimal RAM footprint and optimized for extended background execution.
 
-## Ecosystem Comparison
-NaNo is designed as a lightweight alternative to the core Java AFK application.
+- **Pure Kotlin implementation**
+- **Low RAM usage**
+- **Lower data usage**
+- **Lightweight APK**
+- **Multi-bot friendly without a fixed limit**
 
-| Feature | Java AFK  | Java AFK NaNo |
+## Comparison
+
+| | Java AFK | Java AFK NaNo |
 | :--- | :--- | :--- |
-| **Primary Language** | C / C++ (NDK) | Kotlin |
-| **Bot Engine** | Node.js (Mineflayer) + Go | Pure Kotlin (MCProtocolLib) |
-| **Runtime Dependencies** | Embedded Node, V8, Go | None (Native Android) |
-| **APK Footprint** | Large (~150MB+) | Small (~15MB) |
-| **Battery Efficiency** | Moderate | High |
-| **Target Audience** | Advanced users needing Mineflayer/Go features | Users prioritizing battery life and minimal footprint |
+| **Engine** | Embedded Node.js + Mineflayer | Pure Kotlin |
+| **Bot Limit** | 5 bots | No fixed limit |
+| **RAM Usage** | Higher | Lower |
+| **Data Usage** | Higher | Lower |
+| **Best For** | Full-featured AFK sessions | Lightweight long-running AFK |
 
-## Interface
+## Feature Availability
 
-<div align="center">
-  <img src="./assets/screenshots/nano-ui.png" alt="Nano UI" width="30%" hspace="10"/>
-  <img src="./assets/screenshots/nano-usage.png" alt="Resource Usage" width="30%" hspace="10"/>
-  <img src="./assets/screenshots/nano-settings.png" alt="Settings" width="30%" />
-</div>
+| Feature | Java AFK | Java AFK NaNo |
+| :--- | :---: | :---: |
+| **In-game menu / window handling** | ✅ | ❌ |
+| **Low data usage** | ❌ | ✅ |
+| **Low RAM usage** | ❌ | ✅ |
+| **No fixed bot limit** | ❌ | ✅ |
 
-## Build Instructions
-1. Clone the repository.
-2. Open in Android Studio (Latest stable release).
-3. Sync Gradle dependencies.
-4. Build and run directly on your device. No NDK or external toolchains required.
-   
+> Java AFK provides more advanced bot visibility, including menu/window handling.  
+> Java AFK NaNo focuses on staying lightweight, stable, and efficient.
+
+## Preview
+
+<p align="center">
+  <img src="./Screenshots/server-list-add.png" alt="Server Management" width="48%" />
+  <img src="./Screenshots/session-log.png" alt="Live Session Logs" width="48%" />
+</p>
+
+## Quick Start
+
+1. Install the latest APK from the [Releases](../../releases) page.
+2. Add your server.
+3. Tap **Start**.
+4. Sign in if required.
+5. The bot connects and stays online with minimal resource usage.
