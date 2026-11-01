@@ -1,42 +1,45 @@
-# Java AFK NaNo
+<div align="center">
 
-A lightweight, pure Kotlin Android edition of Java AFK. Engineered without embedded Node.js, V8, or native JNI dependencies, NaNo provides a highly efficient and battery-friendly AFK experience for Android devices.
+# Java AFK NaNo 
+**Lightweight, Pure Kotlin Android Minecraft AFK Bot**
 
-## Core Features
+[![Platform](https://img.shields.io/badge/Platform-Android-green.svg)]()
+[![Language](https://img.shields.io/badge/Language-Kotlin-purple.svg)]()
+[![Size](https://img.shields.io/badge/APK-~15MB-blue.svg)]()
 
-* **Zero Native Dependencies:** Stripped of heavy embedded runtimes (Node.js/V8) and JNI bridges.
-* **Pure Kotlin Implementation:** Built entirely using modern Kotlin, ensuring easier debugging and maintenance.
-* **Minimal Footprint:** Significantly reduced APK size and lower RAM consumption.
-* **Efficient Protocol Handling:** Utilizes native Java Edition protocol implementations.
+</div>
 
-## Architecture Comparison
+## Overview
+Java AFK NaNo is the lightweight, battery-optimized edition of Java AFK. Stripped of all embedded runtimes and native JNI dependencies, it offers a blazing-fast, pure Kotlin implementation for users who need reliable AFK capabilities without the overhead of heavy background engines.
 
-This project includes two distinct editions. Choose the version that best fits your hardware capabilities.
+## Core Capabilities
+- **Zero Native Dependencies:** No embedded Node.js, V8, or Go binaries.
+- **Pure Kotlin Stack:** Modern, idiomatic Android development using Coroutines.
+- **Ultra-Low Overhead:** Minimal RAM footprint and optimized for extended background execution.
 
-| Feature |    Java AFK | Java AFK NaNo |
+## Ecosystem Comparison
+NaNo is designed as a lightweight alternative to the core Java AFK application.
+
+| Feature | Java AFK  | Java AFK NaNo |
 | :--- | :--- | :--- |
-| **Core Language** | C / C++ (NDK) | Kotlin |
-| **Bot Engines** | Node.js (Mineflayer), Go (Gophertunnel) | Pure Kotlin implementation |
-| **Dependencies** | Embedded Node.js, V8, JNI | Zero native dependencies |
-| **APK Footprint** | Large (includes bundled runtimes) | Small / Minimal |
-| **Best For** | Advanced scripting, cross-version support | Low-end devices, battery efficiency |
+| **Primary Language** | C / C++ (NDK) | Kotlin |
+| **Bot Engine** | Node.js (Mineflayer) + Go | Pure Kotlin (MCProtocolLib) |
+| **Runtime Dependencies** | Embedded Node, V8, Go | None (Native Android) |
+| **APK Footprint** | Large (~150MB+) | Small (~15MB) |
+| **Battery Efficiency** | Moderate | High |
+| **Target Audience** | Advanced users needing Mineflayer/Go features | Users prioritizing battery life and minimal footprint |
 
-## Screenshots
+## Interface
 
 <div align="center">
-  <img src="./assets/screenshots/nano-ui.png" alt="Nano UI" width="32%" />
-  <img src="./assets/screenshots/nano-usage.png" alt="Lightweight Usage" width="32%" />
-  <img src="./assets/screenshots/nano-settings.png" alt="Settings" width="32%" />
+  <img src="./assets/screenshots/nano-ui.png" alt="Nano UI" width="30%" hspace="10"/>
+  <img src="./assets/screenshots/nano-usage.png" alt="Resource Usage" width="30%" hspace="10"/>
+  <img src="./assets/screenshots/nano-settings.png" alt="Settings" width="30%" />
 </div>
 
 ## Build Instructions
-
-### Prerequisites
-* Android Studio (Latest stable release)
-* Kotlin 1.9+
-
-### Compilation
 1. Clone the repository.
-2. Open the project in Android Studio.
+2. Open in Android Studio (Latest stable release).
 3. Sync Gradle dependencies.
-4. Build and run directly on your device or emulator.
+4. Build and run directly on your device. No NDK or external toolchains required.
+   
