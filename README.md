@@ -14,7 +14,6 @@ The app is built in Kotlin for Android. Its protocol engine is pure Kotlin/JVM: 
 | A first-run copy of the embedded bot runtime and protocol data (about 120 MB) | An APK around 2.5 MB and about 3 MB of app storage |
 | Support limited to the shipped 64-bit Android ABIs | Builds for Android ABIs without shipping native engine libraries |
 | A saved Microsoft token (the v2.4 README does not specify Android Keystore storage) | Microsoft tokens stored in Android Keystore, plus optional anti-AFK auto-jump and repeating commands |
-| Device-keystore-backed Microsoft token storage | Microsoft tokens stored in Android Keystore |
 
 Both editions include a server list, Microsoft and offline sign-in, per-server logs and chat, reconnect handling, foreground service support, and health/hunger monitoring. See the [original Java AFK project](https://github.com/matheeshaera-beep/Java-AFK) for the full edition.
 
@@ -37,4 +36,4 @@ The release build requires the release signing configuration. Do not commit sign
 
 ## License
 
-Personal project â€” all rights reserved unless stated otherwise.
+Personal project Ã¢â‚¬â€ all rights reserved unless stated otherwise.
