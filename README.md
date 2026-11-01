@@ -1,39 +1,42 @@
-# Java AFK NaNo v3.0
+# Java AFK NaNo
 
-Java AFK NaNo is a lightweight Android edition of [Java AFK](https://github.com/matheeshaera-beep/Java-AFK). It keeps Minecraft Java Edition accounts online while using a much smaller, native Kotlin protocol engine instead of an embedded Node.js runtime. The v3.0 release APK is about 2.5 MB.
+A lightweight, pure Kotlin Android edition of Java AFK. Engineered without embedded Node.js, V8, or native JNI dependencies, NaNo provides a highly efficient and battery-friendly AFK experience for Android devices.
 
-The app is built in Kotlin for Android. Its protocol engine is pure Kotlin/JVM: it uses no Node.js, V8, JNI, or native libraries. It detects the server's Minecraft Java protocol version automatically and supports Minecraft 1.8 through 26.1. Microsoft device-code sign-in stores tokens in Android Keystore; offline usernames are also supported.
+## Core Features
 
-## How this differs from Java AFK v2.4
+* **Zero Native Dependencies:** Stripped of heavy embedded runtimes (Node.js/V8) and JNI bridges.
+* **Pure Kotlin Implementation:** Built entirely using modern Kotlin, ensuring easier debugging and maintenance.
+* **Minimal Footprint:** Significantly reduced APK size and lower RAM consumption.
+* **Efficient Protocol Handling:** Utilizes native Java Edition protocol implementations.
 
-| Java AFK v2.4 has; NaNo v3.0 does not | Java AFK NaNo v3.0 has; Java AFK v2.4 does not |
-| --- | --- |
-| A Bedrock Edition engine and a headless Go command-line client | A pure Kotlin/JVM Minecraft Java protocol engine, with no Node.js, V8, JNI, or native libraries |
-| The Java Edition Mineflayer bot running on an embedded Node.js runtime | Automatic Java protocol-version detection, manual version override, and support for versions 1.8-26.1 |
-| Up to 5 simultaneous bots | Up to 6 simultaneous bots |
-| A first-run copy of the embedded bot runtime and protocol data (about 120 MB) | An APK around 2.5 MB and about 3 MB of app storage |
-| Support limited to the shipped 64-bit Android ABIs | Builds for Android ABIs without shipping native engine libraries |
-| A saved Microsoft token (the v2.4 README does not specify Android Keystore storage) | Microsoft tokens stored in Android Keystore, plus optional anti-AFK auto-jump and repeating commands |
+## Architecture Comparison
 
-Both editions include a server list, Microsoft and offline sign-in, per-server logs and chat, reconnect handling, foreground service support, and health/hunger monitoring. See the [original Java AFK project](https://github.com/matheeshaera-beep/Java-AFK) for the full edition.
+This project includes two distinct editions. Choose the version that best fits your hardware capabilities.
 
-## Download
+| Feature |    Java AFK | Java AFK NaNo |
+| :--- | :--- | :--- |
+| **Core Language** | C / C++ (NDK) | Kotlin |
+| **Bot Engines** | Node.js (Mineflayer), Go (Gophertunnel) | Pure Kotlin implementation |
+| **Dependencies** | Embedded Node.js, V8, JNI | Zero native dependencies |
+| **APK Footprint** | Large (includes bundled runtimes) | Small / Minimal |
+| **Best For** | Advanced scripting, cross-version support | Low-end devices, battery efficiency |
 
-Download and install the [Java AFK NaNo v3.0 APK](https://github.com/matheeshaera-beep/Java-AFK-NaNo/releases/download/v3.0/JavaAFK-NaNo-3.0.apk). Android 15 or newer is required. Version 3.0 uses a new release signing key, so uninstall the older Java AFK app before installing this APK.
+## Screenshots
 
-## Build from source
+<div align="center">
+  <img src="./assets/screenshots/nano-ui.png" alt="Nano UI" width="32%" />
+  <img src="./assets/screenshots/nano-usage.png" alt="Lightweight Usage" width="32%" />
+  <img src="./assets/screenshots/nano-settings.png" alt="Settings" width="32%" />
+</div>
 
-Requirements: JDK 21 and the Android SDK (compile SDK 37, build tools 37.0.0).
+## Build Instructions
 
-```sh
-cd android
-./gradlew :engine:test
-./gradlew :app:assembleDebug
-./gradlew :app:assembleRelease
-```
+### Prerequisites
+* Android Studio (Latest stable release)
+* Kotlin 1.9+
 
-The release build requires the release signing configuration. Do not commit signing keys or `android/keystore.properties`.
-
-## License
-
-Personal project Ã¢â‚¬â€ all rights reserved unless stated otherwise.
+### Compilation
+1. Clone the repository.
+2. Open the project in Android Studio.
+3. Sync Gradle dependencies.
+4. Build and run directly on your device or emulator.
