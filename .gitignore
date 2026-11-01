@@ -1,0 +1,27 @@
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/**/build/
+android/captures/
+*.apk
+*.aab
+
+# Release signing (never commit)
+android/keystore.properties
+android/keystore/
+*.jks
+*.keystore
+
+# Token / credentials
+token/
+ms_token.json
+
+# Python
+__pycache__/
+
+# OS / Editor
+.DS_Store
+*.swp
+.idea/
+.opencode/
