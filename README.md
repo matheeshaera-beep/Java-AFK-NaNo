@@ -11,7 +11,7 @@
 
 ## Overview
 
-Java AFK NaNo is the lightweight edition of Java AFK. It is built for users who want a simple, low-usage AFK bot without the heavier embedded Node.js runtime.
+Java AFK NaNo is the lightweight edition of Java AFK. It is built for users who want a simple, low-usage AFK bot without the heavier embedded Node.js runtime. credits to kakashi lite for making the engine :)
 
 ## Core Capabilities
 
