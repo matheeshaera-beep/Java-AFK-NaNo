@@ -57,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DataUsage
@@ -165,14 +166,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
         AppGraph.init(applicationContext)
         AppGraph.setContext(applicationContext)
-        requestRuntimePermissions()
+        requestNotificationPermission()
         // Target SDK 35+ enforces edge-to-edge: adjustResize no longer moves
         // content, so the keyboard would cover the chat input. Opt in here
         // and handle the IME inset in Compose (single imePadding, SessionScreen).
         enableEdgeToEdge()
-        super.onCreate(savedInstanceState)
         setContent {
             val systemDark = isSystemInDarkTheme()
             var dark by rememberSaveable { mutableStateOf(Prefs.isDark(this, systemDark)) }
@@ -188,24 +189,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestRuntimePermissions() {
+    private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        val pm = getSystemService(PowerManager::class.java)
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:$packageName"),
-                    ),
-                )
-            } catch (_: Exception) {
-            }
+    }
+}
+
+/**
+ * Battery-optimization exemption, requested only when the user taps the drawer
+ * item. Prompting on every launch is hostile and easy to get wrong on OEM ROMs.
+ */
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val pm = context.getSystemService(PowerManager::class.java)
+    if (pm.isIgnoringBatteryOptimizations(context.packageName)) return
+    try {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:${context.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (_: Exception) {
+        // Some OEM builds drop the direct request; open the settings list.
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (_: Exception) {
         }
     }
 }
@@ -308,6 +323,7 @@ private fun DrawerContent(
     val dao = AppGraph.db.serverDao()
     val servers by dao.all().collectAsState(initial = emptyList())
     val activeCount by AppGraph.activeCount.collectAsState(initial = 0)
+    val context = LocalContext.current
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -371,6 +387,14 @@ private fun DrawerContent(
         ResourcesPanel(active = drawerOpen)
 
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.BatterySaver, contentDescription = null) },
+            label = { Text("Battery optimization") },
+            selected = false,
+            onClick = { requestIgnoreBatteryOptimizations(context) },
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
 
         NavigationDrawerItem(
             icon = {
@@ -854,6 +878,19 @@ private fun ServerDialog(
 
 // Per-server settings, moved off the main session screen. Edits auto-save
 // to the database with the same debounce as the old inline fields.
+private suspend fun updateServerField(
+    dao: ServerDao,
+    id: Long,
+    transform: (ServerEntity) -> ServerEntity,
+) {
+    // Read the row again instead of writing the composable's snapshot: two
+    // fields changing inside the same debounce window would otherwise clobber
+    // each other with an old copy.
+    val current = dao.get(id) ?: return
+    val updated = transform(current)
+    if (updated != current) dao.update(updated)
+}
+
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun ServerSettingsDialog(
@@ -894,7 +931,7 @@ private fun ServerSettingsDialog(
     LaunchedEffect(chatCommandText) {
         if (chatCommandText != server.chatCommand) {
             delay(600)
-            dao.update(server.copy(chatCommand = chatCommandText))
+            updateServerField(dao, server.id) { it.copy(chatCommand = chatCommandText) }
             pushLive()
         }
     }
@@ -902,7 +939,7 @@ private fun ServerSettingsDialog(
         val parsed = delayText.toIntOrNull()
         if (parsed != null && parsed != server.commandDelaySeconds) {
             delay(600)
-            dao.update(server.copy(commandDelaySeconds = parsed))
+            updateServerField(dao, server.id) { it.copy(commandDelaySeconds = parsed) }
             pushLive()
         }
     }
@@ -910,35 +947,35 @@ private fun ServerSettingsDialog(
         val parsed = viewDistanceText.toIntOrNull()?.coerceIn(2, 12)
         if (parsed != null && parsed != server.viewDistance) {
             delay(600)
-            dao.update(server.copy(viewDistance = parsed))
+            updateServerField(dao, server.id) { it.copy(viewDistance = parsed) }
             pushLive()
         }
     }
     LaunchedEffect(chatModeValue) {
         if (chatModeValue != server.chatMode) {
             delay(600)
-            dao.update(server.copy(chatMode = chatModeValue))
+            updateServerField(dao, server.id) { it.copy(chatMode = chatModeValue) }
             pushLive()
         }
     }
     LaunchedEffect(autoJumpValue) {
         if (autoJumpValue != server.autoJump) {
             delay(600)
-            dao.update(server.copy(autoJump = autoJumpValue))
+            updateServerField(dao, server.id) { it.copy(autoJump = autoJumpValue) }
             pushLive()
         }
     }
     LaunchedEffect(loopCommandValue) {
         if (loopCommandValue != server.loopCommand) {
             delay(600)
-            dao.update(server.copy(loopCommand = loopCommandValue))
+            updateServerField(dao, server.id) { it.copy(loopCommand = loopCommandValue) }
             pushLive()
         }
     }
     LaunchedEffect(protocolValue, protocolPicked) {
         if (protocolPicked && protocolValue != server.protocolOverride) {
             delay(600)
-            dao.update(server.copy(protocolOverride = protocolValue))
+            updateServerField(dao, server.id) { it.copy(protocolOverride = protocolValue) }
         }
     }
     AlertDialog(

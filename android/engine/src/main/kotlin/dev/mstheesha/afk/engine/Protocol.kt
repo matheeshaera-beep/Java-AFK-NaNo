@@ -27,6 +27,13 @@ internal object Protocol {
     const val V1_21_9 = 773
     const val V1_21_11 = 774
 
+    /**
+     * Text components moved from JSON strings to network NBT in 1.20.3 (765).
+     * Play-state packets (system chat, play disconnect, disguised chat) follow
+     * that boundary; login/config disconnects only switched in 1.20.5 (766).
+     */
+    fun textComponentsAreNbt(protocol: Int): Boolean = protocol >= V1_20_3
+
     fun offlineUuid(name: String): UUID =
         UUID.nameUUIDFromBytes("OfflinePlayer:$name".toByteArray(Charsets.UTF_8))
 

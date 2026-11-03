@@ -9,16 +9,33 @@ import java.net.InetSocketAddress
 import java.net.Socket
 
 object ServerPinger {
+    /** Status JSON is ~50 KB with a favicon; anything far larger is hostile. */
+    private const val MAX_JSON_BYTES = 1 shl 20
+    /** A 64x64 PNG is a few KB; cap the base64 and decoded form generously. */
+    private const val MAX_FAVICON_CHARS = 400_000
+    private const val MAX_FAVICON_BYTES = 300_000
+    private const val MAX_FAVICON_EDGE = 1024
 
     fun fetchFavicon(host: String, port: Int): Bitmap? {
         return try {
             val response = statusResponse(host, port) ?: return null
             val base64 = faviconBase64(response) ?: return null
-            val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            decodeFavicon(base64)
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun decodeFavicon(base64: String): Bitmap? {
+        if (base64.length > MAX_FAVICON_CHARS) return null
+        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        if (bytes.size > MAX_FAVICON_BYTES) return null
+        // Reject huge dimensions before decoding the pixels.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth !in 1..MAX_FAVICON_EDGE) return null
+        if (bounds.outHeight !in 1..MAX_FAVICON_EDGE) return null
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     private fun statusResponse(host: String, port: Int): String? {
@@ -45,9 +62,11 @@ object ServerPinger {
             writePacket(out, request.toByteArray())
             out.flush()
 
-            readVarInt(inp)                    // packet length (full)
+            val packetLen = readVarInt(inp)    // packet length (full)
+            if (packetLen <= 0 || packetLen > MAX_JSON_BYTES + 16) return null
             readVarInt(inp)                    // packet id (0x00 status response)
             val jsonLen = readVarInt(inp)
+            if (jsonLen < 0 || jsonLen > packetLen || jsonLen > MAX_JSON_BYTES) return null
             val jsonBytes = ByteArray(jsonLen)
             inp.readFully(jsonBytes)
             String(jsonBytes, Charsets.UTF_8)

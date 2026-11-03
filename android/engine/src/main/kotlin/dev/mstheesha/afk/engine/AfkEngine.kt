@@ -31,6 +31,11 @@ class AfkEngine(
         val connectTimeoutMs: Int = 10_000,
         val blockingThreads: Int = 4,
         val blockingQueue: Int = 64,
+        /** How long a connected socket may stay pre-PLAY before reconnecting. */
+        val prePlayTimeoutMs: Int = 15_000,
+        /** Threads dedicated to Microsoft sign-in (device code can take minutes). */
+        val authThreads: Int = 1,
+        val authQueue: Int = 8,
     )
 
     data class Metrics(
@@ -85,6 +90,7 @@ class AfkEngine(
         compareBy<TimerTask>({ it.due }, { it.order }),
     )
     private val executor: ThreadPoolExecutor
+    private val authExecutor: ThreadPoolExecutor
     private var order = 0L
     private var lastPublish = 0L
 
@@ -105,6 +111,21 @@ class AfkEngine(
             TimeUnit.SECONDS,
             ArrayBlockingQueue(options.blockingQueue),
             factory,
+            ThreadPoolExecutor.AbortPolicy(),
+        ).apply { allowCoreThreadTimeOut(true) }
+        // Sign-in is split onto its own small pool: a device-code prompt can
+        // block for up to 15 minutes and must not starve DNS/connect work.
+        val authCounter = AtomicInteger()
+        val authFactory = ThreadFactory { r ->
+            Thread(r, "afk-auth-${authCounter.incrementAndGet()}").apply { isDaemon = true }
+        }
+        authExecutor = ThreadPoolExecutor(
+            options.authThreads,
+            options.authThreads,
+            30,
+            TimeUnit.SECONDS,
+            ArrayBlockingQueue(options.authQueue),
+            authFactory,
             ThreadPoolExecutor.AbortPolicy(),
         ).apply { allowCoreThreadTimeOut(true) }
         thread.start()
@@ -153,6 +174,7 @@ class AfkEngine(
         }
         if (thread.isAlive) thread.interrupt()
         executor.shutdownNow()
+        authExecutor.shutdownNow()
         try {
             selector.close()
         } catch (_: Exception) {
@@ -307,16 +329,32 @@ class AfkEngine(
     private fun readBot(bot: BotSession) {
         val connection = bot.conn ?: return
         var reads = 0
+        var eof = false
         while (reads < 16) {
             val read = connection.readFromChannel()
             if (read < 0) {
-                bot.onDisconnected("connection closed")
-                return
+                eof = true
+                break
             }
             if (read == 0) break
             reads++
         }
-        connection.processFrames(16)
+        // Decode everything already buffered before acting on EOF: a final
+        // chat line or kick reason must not be dropped just because the peer
+        // closed right after sending it.
+        var frames = 0
+        while (frames < 512) {
+            val n = connection.processFrames(16)
+            frames += n
+            // Fewer than a full batch means the buffer is empty (or the bot
+            // paused for auth); nothing left to do until the next read.
+            if (n < 16) break
+        }
+        if (eof) {
+            // A kick already scheduled a reconnect and closed the connection.
+            if (bot.conn === connection) bot.onDisconnected("connection closed")
+            return
+        }
         refreshInterest(bot)
     }
 
@@ -384,88 +422,104 @@ class AfkEngine(
         selector.wakeup()
     }
 
+    internal val prePlayTimeoutMs: Int get() = options.prePlayTimeoutMs
+
     internal fun connect(bot: BotSession) {
         if (!running || bots[bot.id] !== bot) return
+        if (!bot.config.onlineMode) {
+            openSocket(bot)
+            return
+        }
+        // Sign-in can block for minutes while waiting for a device code. Run it
+        // on the auth pool so other servers keep connecting, then hand off to
+        // the socket pool once the profile is known.
         try {
-            executor.execute {
+            authExecutor.execute {
                 try {
-                    val target = HostPolicy.resolve(bot.config.host, bot.config.port)
-                    var pingVersion = ""
-                    var protocol = if (bot.config.protocolOverride > 0) {
-                        bot.config.protocolOverride
-                    } else {
-                        val ping = try {
-                            ServerListPing.ping(target.host, target.port, options.connectTimeoutMs)
-                        } catch (e: Exception) {
-                            null
-                        }
-                        pingVersion = ping?.versionName ?: ""
-                        ping?.protocol?.takeIf { it > 0 } ?: PacketTable.latest.protocol
-                    }
-                    if (PacketTable.forProtocol(protocol) == null) {
-                        val fallback = VersionCatalog.nearestSupported(protocol)
-                        if (fallback == null) {
-                            post(
-                                Command.ConnectFailed(
-                                    bot,
-                                    "Unsupported server version (protocol $protocol). " +
-                                        "Supported: ${PacketTable.supportedVersions}",
-                                ),
-                            )
-                            return@execute
-                        }
-                        val label = VersionCatalog.nameOf(fallback) ?: "protocol $fallback"
-                        post(
-                            Command.LogLine(
-                                bot,
-                                "Server reports protocol $protocol, which is unsupported; " +
-                                    "using $fallback ($label)",
-                            ),
-                        )
-                        protocol = fallback
-                        pingVersion = label
-                    }
-                    // Online mode needs the signed-in profile before Login Start:
-                    // the proxy's hasJoined check is keyed by the announced name.
-                    if (bot.config.onlineMode) {
-                        try {
-                            val session = bot.authSession()
-                            val cached = session.accessToken.isNotBlank()
-                            if (!cached) post(Command.LogLine(bot, "Signing in with Microsoft…"))
-                            session.ensureAccessToken()
-                            bot.resolveProfile(session.profileName, session.profileUuid)
-                            if (!cached) {
-                                post(Command.LogLine(bot, "Signed in as ${session.profileName}"))
-                            }
-                        } catch (e: Exception) {
-                            post(Command.AuthFailed(bot, e.message ?: "sign-in failed"))
-                            return@execute
-                        }
-                    }
-                    val channel = SocketChannel.open()
-                    channel.configureBlocking(true)
-                    try {
-                        channel.socket().tcpNoDelay = true
-                        channel.socket().keepAlive = true
-                        channel.socket().connect(
-                            InetSocketAddress(target.host, target.port),
-                            options.connectTimeoutMs,
-                        )
-                    } catch (e: Exception) {
-                        try {
-                            channel.close()
-                        } catch (_: Exception) {
-                        }
-                        throw e
-                    }
-                    channel.configureBlocking(false)
-                    post(Command.Connected(bot, channel, protocol, pingVersion))
+                    val session = bot.authSession()
+                    val cached = session.accessToken.isNotBlank()
+                    if (!cached) post(Command.LogLine(bot, "Signing in with Microsoft…"))
+                    session.ensureAccessToken()
+                    bot.resolveProfile(session.profileName, session.profileUuid)
+                    if (!cached) post(Command.LogLine(bot, "Signed in as ${session.profileName}"))
                 } catch (e: Exception) {
-                    post(Command.ConnectFailed(bot, e.message ?: e.javaClass.simpleName))
+                    post(Command.AuthFailed(bot, e.message ?: "sign-in failed"))
+                    return@execute
                 }
+                if (running && bots[bot.id] === bot) openSocket(bot)
             }
         } catch (e: RejectedExecutionException) {
             post(Command.ConnectFailed(bot, "Engine is busy"))
+        }
+    }
+
+    private fun openSocket(bot: BotSession) {
+        try {
+            executor.execute { connectNow(bot) }
+        } catch (e: RejectedExecutionException) {
+            post(Command.ConnectFailed(bot, "Engine is busy"))
+        }
+    }
+
+    private fun connectNow(bot: BotSession) {
+        if (!running || bots[bot.id] !== bot) return
+        try {
+            val target = HostPolicy.resolve(bot.config.host, bot.config.port)
+            var pingVersion = ""
+            var protocol = if (bot.config.protocolOverride > 0) {
+                bot.config.protocolOverride
+            } else {
+                val ping = try {
+                    ServerListPing.ping(target.host, target.port, options.connectTimeoutMs)
+                } catch (e: Exception) {
+                    null
+                }
+                pingVersion = ping?.versionName ?: ""
+                ping?.protocol?.takeIf { it > 0 } ?: PacketTable.latest.protocol
+            }
+            if (PacketTable.forProtocol(protocol) == null) {
+                val fallback = VersionCatalog.nearestSupported(protocol)
+                if (fallback == null) {
+                    post(
+                        Command.ConnectFailed(
+                            bot,
+                            "Unsupported server version (protocol $protocol). " +
+                                "Supported: ${PacketTable.supportedVersions}",
+                        ),
+                    )
+                    return
+                }
+                val label = VersionCatalog.nameOf(fallback) ?: "protocol $fallback"
+                post(
+                    Command.LogLine(
+                        bot,
+                        "Server reports protocol $protocol, which is unsupported; " +
+                            "using $fallback ($label)",
+                    ),
+                )
+                protocol = fallback
+                pingVersion = label
+            }
+            val channel = SocketChannel.open()
+            channel.configureBlocking(true)
+            try {
+                channel.socket().tcpNoDelay = true
+                channel.socket().keepAlive = true
+                channel.socket().connect(
+                    InetSocketAddress(target.host, target.port),
+                    options.connectTimeoutMs,
+                )
+            } catch (e: Exception) {
+                try {
+                    channel.close()
+                } catch (_: Exception) {
+                }
+                throw e
+            }
+            channel.configureBlocking(false)
+            post(Command.Connected(bot, channel, protocol, pingVersion))
+        } catch (e: Exception) {
+            post(Command.ConnectFailed(bot, e.message ?: e.javaClass.simpleName))
         }
     }
 

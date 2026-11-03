@@ -210,6 +210,239 @@ class FakeServerTest {
     }
 
     /**
+     * Brings one connection all the way to PLAY. The caller owns the socket
+     * afterwards and can send whatever it wants.
+     */
+    private fun java.net.Socket.loginHandshake(): DataOutputStream {
+        tcpNoDelay = true
+        val input = DataInputStream(getInputStream())
+        val output = DataOutputStream(getOutputStream())
+
+        val handshake = readFrame(input) ?: throw IllegalStateException("no handshake")
+        assertEquals(0, handshake.first)
+        handshake.second.readVarInt() // protocol
+        handshake.second.readString() // host
+        handshake.second.readUnsignedShort() // port
+        assertEquals(2, handshake.second.readVarInt()) // next state = login
+
+        val login = readFrame(input) ?: throw IllegalStateException("no login start")
+        assertEquals(table.id(P.LOGIN_C2S_LOGIN_START), login.first)
+
+        send(output, table.id(P.LOGIN_S2C_SUCCESS)) {
+            it.writeUuid(UUID.randomUUID())
+            it.writeString("TestBot")
+            it.writeVarInt(0) // properties
+            it.writeBoolean(false) // strict error handling
+        }
+        readFrame(input) // login acknowledged
+        readFrame(input) // client settings
+
+        send(output, table.id(P.CONFIG_S2C_FINISH))
+        readFrame(input) // config finish
+
+        send(output, table.id(P.PLAY_S2C_JOIN_GAME))
+        return output
+    }
+
+    /**
+     * A server that sends its final chat + disconnect and then closes must not
+     * lose those frames: the engine has to decode what it already read before
+     * it reports EOF.
+     */
+    @Test
+    fun chatAndKickReasonSurviveImmediateClose() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val port = server.localPort
+        val serverError = CopyOnWriteArrayList<Throwable>()
+
+        val serverThread = Thread {
+            try {
+                server.accept().use { socket ->
+                    val output = socket.loginHandshake()
+                    send(output, table.id(P.PLAY_S2C_SYSTEM_CHAT)) {
+                        writeTextComponent(it, "hello before close")
+                        it.writeBoolean(false)
+                    }
+                    send(output, table.id(P.PLAY_S2C_DISCONNECT)) {
+                        writeTextComponent(it, "bye now")
+                    }
+                    output.flush()
+                }
+            } catch (e: Throwable) {
+                serverError.add(e)
+            } finally {
+                runCatching { server.close() }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+
+        val recorder = Recorder()
+        val engine = AfkEngine({ recorder }, null)
+        try {
+            engine.startBot(
+                BotConfig(
+                    id = 11,
+                    host = "127.0.0.1",
+                    port = port,
+                    username = "TestBot",
+                    autoJump = false,
+                    protocolOverride = protocol,
+                ),
+            )
+
+            assertTrue(
+                recorder.chatLatch.await(5, TimeUnit.SECONDS),
+                "chat lost when the server closed immediately",
+            )
+            assertEquals("hello before close", recorder.chats.first().text)
+            val deadline = System.currentTimeMillis() + 5_000
+            while (System.currentTimeMillis() < deadline &&
+                recorder.snapshots.none {
+                    it.phase == Phase.RECONNECTING && it.detail.contains("bye now")
+                }
+            ) {
+                Thread.sleep(20)
+            }
+            assertTrue(
+                recorder.snapshots.any {
+                    it.phase == Phase.RECONNECTING && it.detail.contains("bye now")
+                },
+                "kick reason lost: ${recorder.snapshots.map { it.detail }}",
+            )
+        } finally {
+            engine.close()
+            serverThread.join(2_000)
+            server.close()
+        }
+        assertTrue(serverError.isEmpty(), "server failed: $serverError")
+    }
+
+    /**
+     * One read can hold more than 16 frames. They must all be decoded even if
+     * the peer sends nothing else afterwards (it may be waiting for a reply).
+     */
+    @Test
+    fun moreThanSixteenFramesInOneBatchAreAllProcessed() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val port = server.localPort
+        val serverError = CopyOnWriteArrayList<Throwable>()
+        val release = CountDownLatch(1)
+
+        val serverThread = Thread {
+            try {
+                server.accept().use { socket ->
+                    val output = socket.loginHandshake()
+                    repeat(40) { index ->
+                        send(output, table.id(P.PLAY_S2C_SYSTEM_CHAT)) {
+                            writeTextComponent(it, "burst $index")
+                            it.writeBoolean(false)
+                        }
+                    }
+                    output.flush()
+                    // Keep the socket open and silent: a stalled decoder has no
+                    // later packet to wake it up.
+                    release.await(5, TimeUnit.SECONDS)
+                }
+            } catch (e: Throwable) {
+                serverError.add(e)
+            } finally {
+                runCatching { server.close() }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+
+        val recorder = Recorder()
+        val engine = AfkEngine({ recorder }, null)
+        try {
+            engine.startBot(
+                BotConfig(
+                    id = 12,
+                    host = "127.0.0.1",
+                    port = port,
+                    username = "TestBot",
+                    autoJump = false,
+                    protocolOverride = protocol,
+                ),
+            )
+
+            val deadline = System.currentTimeMillis() + 5_000
+            while (recorder.chats.size < 40 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20)
+            }
+            assertEquals(40, recorder.chats.size, "frames were left undecoded in the buffer")
+        } finally {
+            release.countDown()
+            engine.close()
+            serverThread.join(2_000)
+            server.close()
+        }
+        assertTrue(serverError.isEmpty(), "server failed: $serverError")
+    }
+
+    /**
+     * A server that accepts the connection and then goes silent must not leave
+     * the bot "Connecting" until the OS TCP keep-alive fires hours later.
+     */
+    @Test
+    fun silentServerTimesOutBeforePlay() {
+        val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val port = server.localPort
+
+        val serverThread = Thread {
+            try {
+                server.accept().use { socket ->
+                    readFrame(DataInputStream(socket.getInputStream()))
+                    Thread.sleep(8_000)
+                }
+            } catch (_: Throwable) {
+            } finally {
+                runCatching { server.close() }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+
+        val recorder = Recorder()
+        val engine = AfkEngine(
+            { recorder },
+            null,
+            AfkEngine.Options(prePlayTimeoutMs = 400),
+        )
+        try {
+            engine.startBot(
+                BotConfig(
+                    id = 13,
+                    host = "127.0.0.1",
+                    port = port,
+                    username = "TestBot",
+                    autoJump = false,
+                    protocolOverride = protocol,
+                ),
+            )
+
+            val deadline = System.currentTimeMillis() + 6_000
+            while (System.currentTimeMillis() < deadline &&
+                recorder.snapshots.none { it.phase == Phase.RECONNECTING }
+            ) {
+                Thread.sleep(20)
+            }
+            assertTrue(
+                recorder.snapshots.any { it.phase == Phase.RECONNECTING },
+                "silent server never timed out: ${recorder.snapshots.map { it.phase }}",
+            )
+        } finally {
+            engine.close()
+            serverThread.join(2_000)
+            server.close()
+        }
+    }
+
+    /**
      * A proxy on a newer protocol than the table knows (777) must downgrade to
      * the nearest supported release (775 / 26.1) instead of failing the connect.
      */

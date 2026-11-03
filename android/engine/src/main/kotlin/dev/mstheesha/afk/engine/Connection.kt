@@ -97,6 +97,9 @@ internal class Connection(
     fun processFrames(maxFrames: Int = 16): Int {
         var frames = 0
         while (frames < maxFrames) {
+            // While an auth response is in flight the bot cannot handle packets;
+            // stop before consuming one so it is decoded after the response.
+            if (bot.isPaused()) break
             // Use the width actually present on the wire, not varIntSize(value):
             // some proxies emit non-canonical (over-long) frame lengths.
             val headerInfo = readVarIntPacked(readStart, readEnd) ?: break
@@ -192,12 +195,9 @@ internal class Connection(
         }
         var off = 0
         while (off < frame.size) {
-            val n = try {
-                channel.write(ByteBuffer.wrap(frame.buf, off, frame.size - off))
-            } catch (e: java.io.IOException) {
-                writeQueue.addLast(frame.buf.copyOfRange(off, frame.size))
-                return
-            }
+            // A failed write means the socket is gone. Propagate instead of
+            // queueing bytes that can never be flushed.
+            val n = channel.write(ByteBuffer.wrap(frame.buf, off, frame.size - off))
             if (n <= 0) {
                 writeQueue.addLast(frame.buf.copyOfRange(off, frame.size))
                 return
@@ -206,17 +206,17 @@ internal class Connection(
         }
     }
 
-    /** @return true when everything queued is on the wire. */
+    /**
+     * @return true when everything queued is on the wire.
+     * @throws java.io.IOException when the peer is gone; the engine turns that
+     * into a reconnect instead of waiting for a writable event that never comes.
+     */
     fun flushPending(): Boolean {
         while (writeQueue.isNotEmpty()) {
             val head = writeQueue.first()
             var off = queueOffset
             while (off < head.size) {
-                val n = try {
-                    channel.write(ByteBuffer.wrap(head, off, head.size - off))
-                } catch (e: java.io.IOException) {
-                    return false
-                }
+                val n = channel.write(ByteBuffer.wrap(head, off, head.size - off))
                 if (n <= 0) {
                     queueOffset = off
                     return false

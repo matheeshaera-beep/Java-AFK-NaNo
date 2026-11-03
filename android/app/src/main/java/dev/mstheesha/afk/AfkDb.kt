@@ -41,6 +41,10 @@ interface ServerDao {
     @Query("SELECT * FROM servers WHERE id = :id")
     fun byId(id: Long): Flow<ServerEntity?>
 
+    /** One-shot read used by debounced writers so they never write a stale row. */
+    @Query("SELECT * FROM servers WHERE id = :id LIMIT 1")
+    suspend fun get(id: Long): ServerEntity?
+
     @Insert
     suspend fun insert(server: ServerEntity): Long
 

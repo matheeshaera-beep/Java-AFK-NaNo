@@ -22,6 +22,21 @@ internal class MicrosoftAuth(
         private const val MC_LOGIN_URL = "https://api.minecraftservices.com/authentication/login_with_xbox"
         private const val PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile"
         private const val JOIN_URL = "https://sessionserver.mojang.com/session/minecraft/join"
+
+        /**
+         * Only a dead refresh token justifies asking the user to sign in again.
+         * A 5xx, 429 or network error is transient and must be retried.
+         */
+        internal fun refreshFailureIsPermanent(httpCode: Int, error: String?): Boolean =
+            when (error) {
+                "invalid_grant",
+                "authorization_declined",
+                "invalid_client",
+                "invalid_request",
+                "unauthorized_client",
+                -> true
+                else -> httpCode == 400 || httpCode == 401
+            }
     }
 
     class AuthException(message: String, val kind: Kind = Kind.UNKNOWN) : Exception(message) {
@@ -41,6 +56,7 @@ internal class MicrosoftAuth(
         private set
 
     /** Returns a valid Minecraft access token, refreshing or signing in as needed. */
+    @Synchronized
     fun ensureAccessToken(): String {
         val token = obtainAccessToken()
         ensureProfile()
@@ -70,8 +86,19 @@ internal class MicrosoftAuth(
                 val ms = refresh(saved.refreshToken)
                 finishLogin(ms, saved.refreshToken)
                 return accessToken
+            } catch (e: AuthException) {
+                if (e.kind != AuthException.Kind.EXPIRED) {
+                    // Network trouble or a 5xx: keep the tokens and let the
+                    // reconnect retry instead of forcing a new device code.
+                    refreshed.set(false)
+                    throw e
+                }
+                // Refresh token revoked/expired: device code is the only way back.
             } catch (e: Exception) {
-                // Expired or revoked refresh token: fall through to device code.
+                refreshed.set(false)
+                throw AuthException(
+                    "Token refresh failed: ${e.message ?: e.javaClass.simpleName}",
+                )
             }
         }
         val ms = deviceCodeFlow()
@@ -193,7 +220,12 @@ internal class MicrosoftAuth(
                 ),
             )
         } catch (e: Http.HttpException) {
-            throw AuthException("Token refresh failed", AuthException.Kind.EXPIRED)
+            val error = runCatching { Json.parse(e.body).asObj()?.str("error") }.getOrNull()
+            if (refreshFailureIsPermanent(e.code, error)) {
+                throw AuthException("Sign-in expired", AuthException.Kind.EXPIRED)
+            }
+            // 5xx/429/timeouts: the stored refresh token is still good.
+            throw AuthException("Token refresh failed (HTTP ${e.code}); will retry")
         }
         return parseToken(text, refreshToken)
     }

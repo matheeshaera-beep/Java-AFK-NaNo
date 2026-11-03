@@ -172,6 +172,14 @@ internal class BotSession(
         detail = versionName
         log("Connecting to ${config.host}:${config.port} as ${loginName()} ($versionName)")
         publish()
+        // A peer that accepts TCP and then goes silent must not leave the bot
+        // "Connecting" until the OS keep-alive fires hours later.
+        val e = epoch
+        engine.schedule(this, engine.prePlayTimeoutMs.toLong()) {
+            if (epoch == e && !stopped && conn != null && phase != Phase.PLAYING) {
+                onDisconnected("Timed out during login")
+            }
+        }
     }
 
     fun onConnectFailed(message: String) {
@@ -231,6 +239,9 @@ internal class BotSession(
     fun touchInbound() {
         lastInboundMs = System.currentTimeMillis()
     }
+
+    /** True while frame decoding must pause without consuming the next frame. */
+    internal fun isPaused(): Boolean = authPending
 
     fun checkTimeout() {
         if (phase != Phase.PLAYING || lastInboundMs == 0L) return
@@ -428,7 +439,7 @@ internal class BotSession(
 
     private fun handleLogin(c: Connection, packetId: Int, r: PacketReader) {
         when (packetId) {
-            id(P.LOGIN_S2C_DISCONNECT) -> handleKick(ChatText.fromJson(r.readString(1 shl 20)))
+            id(P.LOGIN_S2C_DISCONNECT) -> handleKick(readLegacyComponent(r))
             id(P.LOGIN_S2C_ENCRYPTION_REQUEST) -> handleEncryption(c, r)
             id(P.LOGIN_S2C_SUCCESS) -> handleLoginSuccess(c, r)
             id(P.LOGIN_S2C_COMPRESS) -> {
@@ -538,7 +549,7 @@ internal class BotSession(
             log("Config packet id=$packetId len=${r.remaining()}")
         }
         when (packetId) {
-            id(P.CONFIG_S2C_DISCONNECT) -> handleKick(readComponent(r))
+            id(P.CONFIG_S2C_DISCONNECT) -> handleKick(readLegacyComponent(r))
             id(P.CONFIG_S2C_FINISH) -> {
                 if (has(P.CONFIG_C2S_FINISH)) {
                     c.send(id(P.CONFIG_C2S_FINISH))
@@ -760,8 +771,8 @@ internal class BotSession(
                 r.readVarInt() // chat type
                 ChatText.fromJson(json)
             }
-            protocol < 766 -> ChatText.fromJson(r.readString(1 shl 20))
-            else -> ChatText.fromNbt(r, false)
+            Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbt(r, false)
+            else -> ChatText.fromJson(r.readString(1 shl 20))
         }
         if (config.chatMode == ChatMode.MESSAGES_ONLY || config.chatMode == ChatMode.HIDDEN) return
         emitChat("system", null, text)
@@ -771,14 +782,14 @@ internal class BotSession(
         if (config.chatMode == ChatMode.COMMANDS_ONLY || config.chatMode == ChatMode.HIDDEN) return
         val text: String
         val sender: String?
-        if (protocol < 765) {
-            text = ChatText.fromJson(r.readString(1 shl 20))
-            r.readVarInt()
-            sender = ChatText.fromJson(r.readString(1 shl 20))
-        } else {
+        if (Protocol.textComponentsAreNbt(protocol)) {
             text = ChatText.fromNbt(r, false)
             r.readVarInt()
             sender = ChatText.fromNbt(r, false)
+        } else {
+            text = ChatText.fromJson(r.readString(1 shl 20))
+            r.readVarInt()
+            sender = ChatText.fromJson(r.readString(1 shl 20))
         }
         if (text.isNotBlank()) emitChat("chat", sender.ifBlank { null }, text)
     }
@@ -833,9 +844,14 @@ internal class BotSession(
     // ---------------------------------------------------------------- kick / reconnect
 
     private fun readComponent(r: PacketReader): String = when {
-        protocol >= 766 -> ChatText.fromNbt(r, false)
+        Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbt(r, false)
         else -> ChatText.fromJson(r.readString(1 shl 20))
     }
+
+    /** Login and configuration disconnects only switched to NBT in 1.20.5. */
+    private fun readLegacyComponent(r: PacketReader): String =
+        if (protocol >= Protocol.V1_20_5) ChatText.fromNbt(r, false)
+        else ChatText.fromJson(r.readString(1 shl 20))
 
     private fun handleKick(reason: String) {
         val text = reason.trim().ifBlank { "Disconnected" }
