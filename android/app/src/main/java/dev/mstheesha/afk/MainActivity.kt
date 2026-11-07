@@ -74,6 +74,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
@@ -158,6 +159,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.StrokeCap
@@ -441,6 +443,8 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
         selectedId = null
     }
 
+    val isDrawerOpen = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -449,21 +453,20 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
                 selectedId = selectedId,
                 onToggleDark = onToggleDark,
                 onSelectServer = { id -> openServer(id) },
-                drawerOpen = drawerState.isOpen,
+                drawerOpen = isDrawerOpen,
             )
         },
     ) {
         Scaffold(
             topBar = {
-                val isDrawerOpen = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
                 val titleOffset by animateFloatAsState(
-                    targetValue = if (isDrawerOpen) 36f else 0f,
-                    animationSpec = tween(durationMillis = 280),
+                    targetValue = if (isDrawerOpen) 70f else 0f,
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
                     label = "homeTitleOffset",
                 )
                 val titleAlpha by animateFloatAsState(
                     targetValue = if (isDrawerOpen) 0f else 1f,
-                    animationSpec = tween(durationMillis = 220),
+                    animationSpec = tween(durationMillis = 200),
                     label = "homeTitleAlpha",
                 )
                 TopAppBar(
@@ -544,47 +547,51 @@ private fun DrawerContent(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxHeight(),
     ) {
-        // App brand header (Centered and prominent)
+        val drawerTitleOffset by animateFloatAsState(
+            targetValue = if (drawerOpen) 0f else -70f,
+            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            label = "drawerTitleOffset",
+        )
+        val drawerTitleAlpha by animateFloatAsState(
+            targetValue = if (drawerOpen) 1f else 0f,
+            animationSpec = tween(durationMillis = 260),
+            label = "drawerTitleAlpha",
+        )
+        val drawerTitleScale by animateFloatAsState(
+            targetValue = if (drawerOpen) 1f else 0.88f,
+            animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            label = "drawerTitleScale",
+        )
+
+        // App brand header (Centered, prominent, and animated)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 14.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 36.dp, bottom = 18.dp)
+                .graphicsLayer {
+                    translationX = drawerTitleOffset
+                    alpha = drawerTitleAlpha
+                    scaleX = drawerTitleScale
+                    scaleY = drawerTitleScale
+                },
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141218),
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                modifier = Modifier.size(54.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_launcher_foreground),
-                        contentDescription = null,
-                        modifier = Modifier.size(46.dp),
-                    )
-                }
-            }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = "Java AFK NaNo",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
-                Text(
-                    text = "Lightweight AFK Client",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-            }
+            Text(
+                text = "Java AFK NaNo",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+            Text(
+                text = "Lightweight AFK Client",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+            )
         }
 
         HorizontalDivider(
@@ -1719,132 +1726,117 @@ private fun ServerDialog(
         },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
-                // Connection card
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                // Server address section
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Speed,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp),
-                            )
-                            Text(
-                                "SERVER ADDRESS",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 0.8.sp,
-                            )
-                        }
-                        OutlinedTextField(
-                            value = draft.name,
-                            onValueChange = { onChange(draft.copy(name = it)) },
-                            label = { Text("Display Name") },
-                            placeholder = { Text("e.g. My SMP") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = appOutlinedTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp),
+                        Icon(
+                            Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp),
                         )
-                        OutlinedTextField(
-                            value = draft.host,
-                            onValueChange = { onChange(draft.copy(host = it)) },
-                            label = { Text("Server Host / IP") },
-                            placeholder = { Text("e.g. smp.example.com") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = appOutlinedTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp),
-                        )
-                        OutlinedTextField(
-                            value = draft.port,
-                            onValueChange = { onChange(draft.copy(port = it)) },
-                            label = { Text("Port") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            isError = !draft.portValid,
-                            supportingText = if (!draft.portValid) { { Text("Port must be 1\u201365535") } } else null,
-                            colors = appOutlinedTextFieldColors(),
-                            shape = RoundedCornerShape(12.dp),
+                        Text(
+                            "SERVER ADDRESS",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 0.8.sp,
                         )
                     }
+                    OutlinedTextField(
+                        value = draft.name,
+                        onValueChange = { onChange(draft.copy(name = it)) },
+                        label = { Text("Display Name") },
+                        placeholder = { Text("e.g. My SMP") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = appOutlinedTextFieldColors(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    OutlinedTextField(
+                        value = draft.host,
+                        onValueChange = { onChange(draft.copy(host = it)) },
+                        label = { Text("Server Host / IP") },
+                        placeholder = { Text("e.g. smp.example.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = appOutlinedTextFieldColors(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    OutlinedTextField(
+                        value = draft.port,
+                        onValueChange = { onChange(draft.copy(port = it)) },
+                        label = { Text("Port") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = !draft.portValid,
+                        supportingText = if (!draft.portValid) { { Text("Port must be 1\u201365535") } } else null,
+                        colors = appOutlinedTextFieldColors(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
                 }
 
-                // Authentication card
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+
+                // Authentication section
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp),
-                            )
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            "AUTHENTICATION",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 0.8.sp,
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Microsoft account", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "AUTHENTICATION",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 0.8.sp,
+                                if (draft.onlineMode) "Official Mojang/Microsoft auth" else "Cracked / offline server mode",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Microsoft account", style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    if (draft.onlineMode) "Official Mojang/Microsoft auth" else "Cracked / offline server mode",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            AppSwitch(
-                                checked = draft.onlineMode,
-                                onCheckedChange = { onChange(draft.copy(onlineMode = it)) },
-                            )
-                        }
-                        if (!draft.onlineMode) {
-                            OutlinedTextField(
-                                value = draft.username,
-                                onValueChange = { onChange(draft.copy(username = it)) },
-                                label = { Text("Offline username") },
-                                placeholder = { Text("AFKBot") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = appOutlinedTextFieldColors(),
-                                shape = RoundedCornerShape(12.dp),
-                            )
-                        }
+                        AppSwitch(
+                            checked = draft.onlineMode,
+                            onCheckedChange = { onChange(draft.copy(onlineMode = it)) },
+                        )
+                    }
+                    if (!draft.onlineMode) {
+                        OutlinedTextField(
+                            value = draft.username,
+                            onValueChange = { onChange(draft.copy(username = it)) },
+                            label = { Text("Offline username") },
+                            placeholder = { Text("AFKBot") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = appOutlinedTextFieldColors(),
+                            shape = RoundedCornerShape(12.dp),
+                        )
                     }
                 }
             }
@@ -2023,61 +2015,85 @@ private fun ServerSettingsDialog(
             pushLive()
         }
     }
+    val dialogBg = MaterialTheme.colorScheme.surfaceContainerHigh
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(22.dp),
+        containerColor = dialogBg,
         modifier = Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(22.dp)),
         title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+            Column(Modifier.fillMaxWidth()) {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF7FD18B).copy(alpha = 0.16f),
-                        border = BorderStroke(1.dp, Color(0xFF7FD18B).copy(alpha = 0.5f)),
-                        modifier = Modifier.size(38.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f),
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color(0xFF7FD18B),
-                                modifier = Modifier.size(20.dp),
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF7FD18B).copy(alpha = 0.16f),
+                            border = BorderStroke(1.dp, Color(0xFF7FD18B).copy(alpha = 0.5f)),
+                            modifier = Modifier.size(38.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = Color(0xFF7FD18B),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                server.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "Server Configuration",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    Column {
-                        Text(
-                            server.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            "Server Configuration",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                )
             }
         },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-            ) {
+            val scrollState = rememberScrollState()
+            val topShadowAlpha by animateFloatAsState(
+                targetValue = if (scrollState.canScrollBackward) 1f else 0f,
+                animationSpec = tween(180),
+                label = "topShadowAlpha",
+            )
+            val bottomShadowAlpha by animateFloatAsState(
+                targetValue = if (scrollState.canScrollForward) 1f else 0f,
+                animationSpec = tween(180),
+                label = "bottomShadowAlpha",
+            )
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scrollState)
+                        .padding(top = 4.dp, bottom = 4.dp),
+                ) {
                 SettingsSection("Connection & Protocol", icon = Icons.Default.Speed, iconTint = MaterialTheme.colorScheme.primary) {
                     // Friendly version picker instead of a raw protocol number.
                     Row(
@@ -2358,7 +2374,46 @@ private fun ServerSettingsDialog(
                     }
                 }
             }
-        },
+
+            // Top fading shadow gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer { alpha = topShadowAlpha }
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                dialogBg,
+                                dialogBg.copy(alpha = 0.85f),
+                                dialogBg.copy(alpha = 0.35f),
+                                Color.Transparent,
+                            )
+                        )
+                    )
+            )
+
+            // Bottom fading shadow gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer { alpha = bottomShadowAlpha }
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                dialogBg.copy(alpha = 0.35f),
+                                dialogBg.copy(alpha = 0.85f),
+                                dialogBg,
+                            )
+                        )
+                    )
+            )
+        }
+    },
         confirmButton = {
             Button(
                 onClick = onDismiss,
