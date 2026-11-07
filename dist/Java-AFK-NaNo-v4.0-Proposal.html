@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Java AFK NaNo v4.0 - Product & Technical Proposal</title>
+<style>
+  @page {
+    size: A4;
+    margin: 1.5cm;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e1e24;
+    background: #ffffff;
+    line-height: 1.55;
+    margin: 0;
+    padding: 24px;
+    font-size: 13px;
+  }
+  h1, h2, h3, h4 {
+    color: #0f172a;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 4px;
+    color: #0b5d1e;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 12px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #e8f5e9;
+    color: #0b5d1e;
+    border: 1px solid #c8e6c9;
+  }
+  .badge-pillar {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+  }
+  .badge-effort {
+    background: #f1f5f9;
+    color: #475569;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .card {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 14px;
+    background: #f8fafc;
+    page-break-inside: avoid;
+  }
+  .card-header {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    color: #0f172a;
+  }
+  .diagram {
+    background: #0f172a;
+    color: #38bdf8;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 11px;
+    padding: 14px;
+    border-radius: 6px;
+    white-space: pre;
+    line-height: 1.35;
+    margin: 14px 0;
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 12px;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 8px 10px;
+    text-align: left;
+  }
+  th {
+    background: #f1f5f9;
+    font-weight: 600;
+    color: #334155;
+  }
+  tr:nth-child(even) td {
+    background: #f8fafc;
+  }
+  .feature-item {
+    border-left: 3px solid #0b5d1e;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #ffffff;
+    border-radius: 0 6px 6px 0;
+    border-top: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .page-break {
+    page-break-before: always;
+  }
+  .highlight {
+    color: #0b5d1e;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER / HEADER -->
+  <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+      <span class="badge">PROPOSAL DOCUMENT</span>
+      <h1>Java AFK NaNo v4.0 Evolution</h1>
+      <div class="subtitle">Next-Generation Feature Concepts, UI/UX Redesign Blueprint & Engine Architecture</div>
+    </div>
+    <div style="text-align: right; font-size: 11px; color: #64748b;">
+      <strong>Project:</strong> Java AFK NaNo<br>
+      <strong>Target:</strong> Android (Kotlin JVM)<br>
+      <strong>Date:</strong> November 2026<br>
+      <strong>Status:</strong> Ready for Review
+    </div>
+  </div>
+
+  <!-- EXECUTIVE SUMMARY -->
+  <h2>1. Executive Summary & Product Vision</h2>
+  <p>
+    <strong>Java AFK NaNo</strong> is an ultra-lightweight, battery-efficient headless Minecraft Java Edition client designed specifically for mobile Android devices. It connects directly to Minecraft servers (protocols 1.8 through 1.21.4+), authenticates, handles network protocol keep-alives, and maintains long-running AFK sessions using a foreground Android service.
+  </p>
+  <p>
+    The core philosophy of the application is the <strong>"NaNo" standard</strong>:
+  </p>
+  <ul>
+    <li><strong>Sub-3 MB APK Size:</strong> Pure Kotlin/JVM with zero WebView, Chromium, or JNI rendering baggage.</li>
+    <li><strong>Near-Zero Battery Impact:</strong> Consumes &lt;0.5% battery over an 8-hour overnight AFK session.</li>
+    <li><strong>Pure Headless Protocol:</strong> Receives only network frames; never renders expensive 3D voxels.</li>
+  </ul>
+  <p>
+    The v4.0 upgrade aims to elevate Java AFK NaNo from a simple connection tool into an <strong>intelligent, self-preserving Minecraft companion</strong> with visual world cues, anti-detection behavior, and survival safeguards.
+  </p>
+
+  <div class="diagram">
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Java AFK NaNo v4.0 Architecture                          │
+│                                                                             │
+│   [Server List Ping]  ───►  Live Ping (24ms) + Online Players + MOTD Banner │
+│   [Health/Food Pkts]  ───►  Visual Hearts HUD & Auto-Eat Trigger            │
+│   [Position & Yaw]    ───►  Natural Head Swivel (±15°) + XYZ Coordinates    │
+│   [Chat Stream]       ───►  Colorized Chat (§) + Macro Chips + Mentions     │
+│   [Foreground Service]───►  60s Reboot Delay + Android Notification Actions │
+└─────────────────────────────────────────────────────────────────────────────┘
+  </div>
+
+  <!-- REDESIGN AREAS -->
+  <h2>2. UX & UI Areas Requiring Redesign</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">1. Server Cards (Home Screen)</div>
+      <p><strong>Current Issue:</strong> Cards are static. You cannot tell if a server is online or what its latency is without entering the session.</p>
+      <p><strong>v4.0 Redesign:</strong></p>
+      <ul>
+        <li><strong>Live Ping Pill:</strong> Displays TCP latency (e.g., <span class="highlight">24ms</span>) and player count (<span class="highlight">18/50</span>).</li>
+        <li><strong>1-Tap Card Toggle:</strong> Instant Connect/Disconnect power button right on the card.</li>
+        <li><strong>MOTD Strip:</strong> Single-line server announcement preview.</li>
+        <li><strong>Pulsing Alive Indicator:</strong> Retains smooth 2s breathing glow ring for online bots.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">2. Session Screen HUD</div>
+      <p><strong>Current Issue:</strong> Top status card occupies 40% of the screen height, squeezing logs/chat into a tiny scrollable area.</p>
+      <p><strong>v4.0 Redesign:</strong></p>
+      <ul>
+        <li><strong>Minecraft Hearts HUD:</strong> 10 authentic pixel-perfect red hearts & 10 food drumsticks.</li>
+        <li><strong>Compact Metrics:</strong> 3-column chip row for Coordinates, AFK Time, and Data Usage.</li>
+        <li><strong>Expanded Chat Space:</strong> 75% of screen allocated to streaming chat and logs.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">3. Quick Macro Chips Bar</div>
+      <p><strong>Current Issue:</strong> Executing frequent commands (<span class="highlight">/afk</span>, <span class="highlight">/spawn</span>, <span class="highlight">/home</span>) requires opening the soft keyboard and typing manually every time.</p>
+      <p><strong>v4.0 Redesign:</strong> Horizontally scrolling chips directly above the input box for 1-tap command execution.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">4. Segmented Settings Sheet</div>
+      <p><strong>Current Issue:</strong> Monolithic scroll dialog with raw text inputs.</p>
+      <p><strong>v4.0 Redesign:</strong> Clean Material 3 Modal Bottom Sheet organized into 3 clear tabs: <em>Connection</em>, <em>AFK Automation</em>, and <em>Survival & Safety</em>.</p>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- THE 4 PILLARS -->
+  <h2>3. Comprehensive 16-Feature Proposal Matrix</h2>
+
+  <h3>🛡️ Pillar 1: Pro AFK Behaviors & Survival Guard</h3>
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>1. Natural Camera Swivel (Yaw/Pitch Oscillation)</strong>
+      <div><span class="badge badge-pillar">Anti-AFK</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Gently rotates the bot's camera angle by ±5° to ±18° with randomized intervals (every 12–28 seconds). Fools advanced anti-cheat plugins (Vulcan, GrimAC, Matrix) looking for static robotic angles. Network cost: 1 tiny packet (12 bytes) every 20 seconds; 0% battery impact.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>2. Auto-Eat & Starvation Guard</strong>
+      <div><span class="badge badge-pillar">Survival</span> <span class="badge badge-effort">Effort: Medium</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Reads live food packets (<code>food = r.readVarInt()</code>). When hunger drops below 14 (7 drumsticks), the bot automatically sends an interaction packet on the hotbar food slot to eat, preventing starvation deaths while AFK at mob farms.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>3. Sneak / Un-sneak Micro-Pulse</strong>
+      <div><span class="badge badge-pillar">Social</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Transmits an <code>ENTITY_ACTION</code> packet (sneak for 400ms, then stand) periodically. Visually signals to other players on the server that the bot account is alive.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>4. Emergency Disconnect on Damage</strong>
+      <div><span class="badge badge-pillar">Safety</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Configurable threshold (e.g., &lt; 4 hearts): If the bot takes damage from lava, suffocating blocks, or hostile mobs, it cleanly disconnects to preserve equipment and inventory.
+    </div>
+  </div>
+
+  <h3>🎮 Pillar 2: Visual HUD & Chat Superpowers</h3>
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>5. Authentic Minecraft Hearts & Food Drumsticks HUD</strong>
+      <div><span class="badge badge-pillar">HUD</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Renders 10 red hearts and 10 food drumsticks in Jetpack Compose, updating dynamically whenever <code>PLAY_S2C_UPDATE_HEALTH</code> is received.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>6. Quick Command Macro Chips Bar</strong>
+      <div><span class="badge badge-pillar">Chat</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Horizontally scrolling chips (<code>/afk</code>, <code>/spawn</code>, <code>/home</code>, <code>/repair</code>, <code>/heal</code>, <code>/tpa yes</code>) above the chat input box for instant execution.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>7. Minecraft Color-Coded Chat (§ Formatting)</strong>
+      <div><span class="badge badge-pillar">Visual</span> <span class="badge badge-effort">Effort: Medium</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Converts standard Minecraft section formatting codes (§a green, §c red, §6 gold, §l bold) into Compose <code>AnnotatedString</code> for authentic in-game chat reading.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>8. Live XYZ Coordinates & Cardinal Compass</strong>
+      <div><span class="badge badge-pillar">HUD</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Displays current coordinates (e.g. <code>124, 68, -312</code>) and cardinal orientation (North/South/East/West) parsed from player position packets.
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  <h3>🔔 Pillar 3: Background Reliability, Reconnects & Alerts</h3>
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>9. Intelligent Server Restart Grace Period</strong>
+      <div><span class="badge badge-pillar">Reliability</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      When a disconnect reason matches "Restarting" or "Rebooting", the client enters a 45–60s grace delay instead of immediate rapid reconnect backoff, preventing connection firewall bans.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>10. Chat Mention & Direct Message Push Notifications</strong>
+      <div><span class="badge badge-pillar">Alerts</span> <span class="badge badge-effort">Effort: Medium</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Vibrates the phone and posts an Android heads-up notification when your username is mentioned or someone whispers via <code>/msg</code>.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>11. Notification Action Buttons ([Stop All], [Reconnect])</strong>
+      <div><span class="badge badge-pillar">System</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Interactive action buttons attached directly to the ongoing Android foreground service notification.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>12. Night AFK Scheduled Window</strong>
+      <div><span class="badge badge-pillar">Automation</span> <span class="badge badge-effort">Effort: Medium</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Allows scheduling connection windows (e.g. 11:30 PM to 6:30 AM) to save battery and mobile data.
+    </div>
+  </div>
+
+  <h3>🧰 Pillar 4: Multi-Bot Management & Presets</h3>
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>13. JSON & QR Code Server Config Backup/Share</strong>
+      <div><span class="badge badge-pillar">Utility</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Export configured servers and command macros to clipboard JSON or share with a friend via a QR code.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>14. 1-Tap Popular Server Presets</strong>
+      <div><span class="badge badge-pillar">Presets</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Instant presets for Hypixel, 2b2t, DonutSMP, and Aternos with automated protocol detection.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>15. Batch Master Actions (Start All / Stop All)</strong>
+      <div><span class="badge badge-pillar">Batch</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Master controls in the drawer or top bar to connect or disconnect all configured bots in sequence.
+    </div>
+  </div>
+
+  <div class="feature-item">
+    <div style="display:flex; justify-content:space-between;">
+      <strong>16. Per-Server Custom Accent Color & Tags</strong>
+      <div><span class="badge badge-pillar">Customization</span> <span class="badge badge-effort">Effort: Low</span></div>
+    </div>
+    <div style="font-size:12px; color:#475569; margin-top:4px;">
+      Tag servers (e.g. <em>SMP</em>, <em>Anarchy</em>, <em>Hub</em>) with custom badges for visual clarity.
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE TABLE -->
+  <h2>4. Technical Implementation & Feasibility Matrix</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th>Target Code Component</th>
+        <th>Network / System Mechanism</th>
+        <th>Overhead</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Natural Head Swivel</strong></td>
+        <td><code>BotSession.kt</code></td>
+        <td><code>scheduleSwivel()</code> sending <code>sendLook()</code></td>
+        <td>12 bytes / 20s (0% CPU)</td>
+      </tr>
+      <tr>
+        <td><strong>Auto-Eat Food</strong></td>
+        <td><code>BotSession.kt</code></td>
+        <td>Check <code>food &lt; 14</code> in health packet &rarr; send item use</td>
+        <td>Event-driven (0 polling)</td>
+      </tr>
+      <tr>
+        <td><strong>Minecraft Hearts HUD</strong></td>
+        <td><code>MainActivity.kt</code></td>
+        <td>Jetpack Compose <code>Row</code> rendering heart icons</td>
+        <td>0 KB assets, pure UI</td>
+      </tr>
+      <tr>
+        <td><strong>Quick Macro Bar</strong></td>
+        <td><code>MainActivity.kt</code></td>
+        <td>Compose <code>LazyRow</code> calling <code>session.sendChat()</code></td>
+        <td>Minimal Compose state</td>
+      </tr>
+      <tr>
+        <td><strong>Live Ping & Player Count</strong></td>
+        <td><code>ServerPinger.kt</code></td>
+        <td>Measure roundtrip TCP handshake + parse status JSON</td>
+        <td>One-shot async coroutine</td>
+      </tr>
+      <tr>
+        <td><strong>Emergency Disconnect</strong></td>
+        <td><code>BotSession.kt</code></td>
+        <td>Trigger <code>stop()</code> if <code>health &lt; minThreshold</code></td>
+        <td>3 lines of Kotlin</td>
+      </tr>
+      <tr>
+        <td><strong>Database Evolution</strong></td>
+        <td><code>AfkDb.kt</code></td>
+        <td>Room Migration 7 &rarr; 8 adding columns with default values</td>
+        <td>100% backward compatible</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ROADMAP -->
+  <h2>5. Phased Implementation Roadmap</h2>
+  <div class="grid-2">
+    <div class="card" style="border-left: 3px solid #0b5d1e;">
+      <strong>Phase 1: Quick Wins (Immediate)</strong>
+      <ul style="font-size: 11px; margin-top: 6px; padding-left: 18px;">
+        <li>Natural Camera Swivel & Sneak Pulse</li>
+        <li>Minecraft Hearts & Hunger Drumsticks HUD</li>
+        <li>Quick Command Macro Chips Bar</li>
+        <li>Emergency Health Disconnect</li>
+      </ul>
+    </div>
+    <div class="card" style="border-left: 3px solid #1d4ed8;">
+      <strong>Phase 2: Card & Connection Polish</strong>
+      <ul style="font-size: 11px; margin-top: 6px; padding-left: 18px;">
+        <li>Live Ping & Player Count Pills on Cards</li>
+        <li>1-Tap Power Toggle on Cards</li>
+        <li>Notification Action Buttons ([Stop All], [Reconnect])</li>
+        <li>Intelligent 60s Server Reboot Delay</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="margin-top: 30px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 12px;">
+    Java AFK NaNo &bull; Ultra-Lightweight Headless Minecraft Client for Android &bull; Document generated for review
+  </div>
+
+</body>
+</html>
