@@ -1,0 +1,24 @@
+name: Upload Release Asset
+
+on:
+  push:
+    branches:
+      - New-UI-update
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upload-asset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Attach APK to GitHub Release v3.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v3.5 dist/JavaAFK-3.5.apk --clobber
