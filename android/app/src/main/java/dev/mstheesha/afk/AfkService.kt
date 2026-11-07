@@ -130,7 +130,7 @@ class AfkService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Java AFK active")
+            .setContentTitle("Java AFK NaNo active")
             .setContentText(names.joinToString(", "))
             .setSmallIcon(R.drawable.ic_stat_afk)
             .setContentIntent(openApp)

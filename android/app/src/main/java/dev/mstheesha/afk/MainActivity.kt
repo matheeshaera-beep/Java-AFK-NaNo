@@ -18,6 +18,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -51,19 +52,31 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
@@ -96,10 +109,12 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -112,6 +127,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -121,11 +137,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.focus.FocusRequester
@@ -225,12 +249,17 @@ private fun requestIgnoreBatteryOptimizations(context: Context) {
     }
 }
 
+val DividerColor = Color(0xFF5A5764)
+val StrongOutlineColor = Color(0xFF77737F)
+
 private val GreenLight = lightColorScheme(
     primary = Color(0xFF2E7D32),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFB7EFB0),
     secondary = Color(0xFF43A047),
     tertiary = Color(0xFF66BB6A),
+    outline = StrongOutlineColor,
+    outlineVariant = DividerColor,
 )
 private val GreenDark = darkColorScheme(
     primary = Color(0xFF81C784),
@@ -238,6 +267,48 @@ private val GreenDark = darkColorScheme(
     primaryContainer = Color(0xFF005300),
     secondary = Color(0xFFA5D6A7),
     tertiary = Color(0xFF66BB6A),
+    outline = StrongOutlineColor,
+    outlineVariant = DividerColor,
+)
+
+@Composable
+fun appSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color(0xFF0B5D1E),
+    checkedTrackColor = Color(0xFF7FD18B),
+    checkedBorderColor = Color.Transparent,
+    uncheckedThumbColor = Color(0xFF9A95A3),
+    uncheckedTrackColor = Color(0xFF2C2A32),
+    uncheckedBorderColor = Color(0xFF77737F),
+    disabledCheckedThumbColor = Color(0xFF0B5D1E).copy(alpha = 0.38f),
+    disabledCheckedTrackColor = Color(0xFF7FD18B).copy(alpha = 0.38f),
+    disabledCheckedBorderColor = Color.Transparent,
+    disabledUncheckedThumbColor = Color(0xFF9A95A3).copy(alpha = 0.38f),
+    disabledUncheckedTrackColor = Color(0xFF2C2A32).copy(alpha = 0.38f),
+    disabledUncheckedBorderColor = Color(0xFF77737F).copy(alpha = 0.38f),
+)
+
+@Composable
+fun AppSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
+        colors = appSwitchColors(),
+    )
+}
+
+@Composable
+fun appOutlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+    focusedBorderColor = Color(0xFF7FD18B),
+    focusedLabelColor = Color(0xFF7FD18B),
+    cursorColor = Color(0xFF7FD18B),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -275,7 +346,13 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Java AFK") },
+                    title = {
+                        Text(
+                            "Java AFK NaNo",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
                     actions = {
                         if (selectedId == null) {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -330,8 +407,10 @@ private fun DrawerContent(
         modifier = Modifier.fillMaxHeight(),
     ) {
         Text(
-            "Java AFK",
-            style = MaterialTheme.typography.titleLarge,
+            "Java AFK NaNo",
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp),
         )
         Spacer(Modifier.height(16.dp))
@@ -361,16 +440,26 @@ private fun DrawerContent(
             )
         } else {
             servers.forEach { server ->
+                val session = remember(server.id) { AppGraph.sessionFor(server.id) }
+                val state by session.state.collectAsState()
                 NavigationDrawerItem(
                     icon = {
-                        ServerAvatar(
+                        ServerAvatarStatus(
                             host = server.host,
                             port = server.port,
                             name = server.name,
+                            state = state,
                             size = 32.dp,
                         )
                     },
-                    label = { Text(server.name) },
+                    label = {
+                        Text(
+                            server.name,
+                            color = if (state == "connected") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
                     selected = false,
                     onClick = { onSelectServer(server.id) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
@@ -382,11 +471,19 @@ private fun DrawerContent(
         // server list owns the top of the drawer.
         Spacer(Modifier.weight(1f))
 
-        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+        HorizontalDivider(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
 
         ResourcesPanel(active = drawerOpen)
 
-        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+        HorizontalDivider(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
 
         NavigationDrawerItem(
             icon = { Icon(Icons.Default.BatterySaver, contentDescription = null) },
@@ -409,7 +506,7 @@ private fun DrawerContent(
             selected = dark,
             onClick = { onToggleDark(!dark) },
             badge = {
-                Switch(
+                AppSwitch(
                     checked = dark,
                     onCheckedChange = null,
                     modifier = Modifier.graphicsLayer { scaleX = 0.7f; scaleY = 0.7f },
@@ -419,7 +516,7 @@ private fun DrawerContent(
         )
 
         Text(
-            "Java AFK v${BuildConfig.VERSION_NAME}",
+            "Java AFK NaNo v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
@@ -500,7 +597,7 @@ private fun ResourcesPanel(active: Boolean) {
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "RAM: $ram MB",
+                    "App total $ram MB",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -632,6 +729,201 @@ private fun cacheFavicon(key: String, bmp: android.graphics.Bitmap) {
     faviconCache[key] = bmp
 }
 
+private fun formatUptime(seconds: Long): String {
+    val totalMinutes = seconds / 60
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    val days = hours / 24
+    val remHours = hours % 24
+    return when {
+        days > 0 -> "up ${days}d ${remHours}h"
+        hours > 0 -> "up ${hours}h ${minutes}m"
+        else -> "up ${minutes}m"
+    }
+}
+
+@Composable
+private fun ServerAvatarStatus(
+    host: String,
+    port: Int,
+    name: String,
+    state: String,
+    size: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val animationsDisabled = remember {
+        try {
+            android.provider.Settings.Global.getFloat(
+                context.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1.0f,
+            ) == 0f
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    val isOnline = state == "connected"
+    val isConnecting = state == "connecting" || state == "authenticating" || state == "reconnecting"
+    val isError = state == "error"
+    val isOffline = !isOnline && !isConnecting && !isError
+
+    val targetColor = when {
+        isOnline -> Color(0xFF7FD18B)
+        isConnecting -> Color(0xFFFFB74D)
+        isError -> Color(0xFFE57373)
+        else -> Color.Transparent
+    }
+
+    val animatedColor by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(durationMillis = 250),
+        label = "avatar_status_color",
+    )
+
+    val contentDesc = when {
+        isOnline -> "Online"
+        isConnecting -> if (state == "reconnecting") "Reconnecting" else "Connecting"
+        isError -> "Error"
+        else -> "Offline"
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "avatar_status_anim")
+
+    // Pulse animation for Online (scale 1.0 -> 1.12, alpha 0.9 -> 0.3, ~1.8 s loop)
+    val pulseScale by if (isOnline && !animationsDisabled) {
+        infiniteTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue = 1.12f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1800, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "pulse_scale",
+        )
+    } else {
+        remember { mutableFloatStateOf(1.0f) }
+    }
+
+    val pulseAlpha by if (isOnline && !animationsDisabled) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.9f,
+            targetValue = 0.3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1800, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "pulse_alpha",
+        )
+    } else {
+        remember { mutableFloatStateOf(0.7f) }
+    }
+
+    // Rotating sweeping arc for Connecting
+    val sweepAngle by if (isConnecting && !animationsDisabled) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "connecting_sweep",
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
+
+    val ringExtra = 6.dp
+    val containerSize = size + ringExtra * 2
+
+    Box(
+        modifier = modifier
+            .size(containerSize)
+            .semantics { contentDescription = contentDesc },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!isOffline) {
+            Canvas(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        if (isOnline) {
+                            scaleX = pulseScale
+                            scaleY = pulseScale
+                        }
+                    },
+            ) {
+                val strokeWidth = 2.dp.toPx()
+                val radius = (size.toPx() / 2f) + 2.dp.toPx()
+                val centerOffset = center
+
+                when {
+                    isOnline -> {
+                        drawCircle(
+                            color = animatedColor.copy(alpha = pulseAlpha),
+                            radius = radius,
+                            center = centerOffset,
+                            style = Stroke(width = strokeWidth),
+                        )
+                    }
+                    isConnecting -> {
+                        val arcSize = radius * 2
+                        drawArc(
+                            color = animatedColor,
+                            startAngle = sweepAngle,
+                            sweepAngle = 100f,
+                            useCenter = false,
+                            topLeft = Offset(centerOffset.x - radius, centerOffset.y - radius),
+                            size = Size(arcSize, arcSize),
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                        )
+                    }
+                    isError -> {
+                        drawCircle(
+                            color = animatedColor,
+                            radius = radius,
+                            center = centerOffset,
+                            style = Stroke(width = strokeWidth),
+                        )
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    if (isOffline) {
+                        alpha = 0.55f
+                    }
+                },
+        ) {
+            ServerAvatar(
+                host = host,
+                port = port,
+                name = name,
+                size = size,
+                desaturate = isOffline,
+            )
+        }
+
+        if (isOnline || isError) {
+            val dotSize = if (size >= 40.dp) 11.dp else 8.dp
+            Box(
+                modifier = Modifier
+                    .size(dotSize)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = (-2).dp, y = (-2).dp)
+                    .background(animatedColor, CircleShape)
+                    .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+            )
+        }
+    }
+}
+
 @Composable
 private fun ServerRow(
     server: ServerEntity,
@@ -645,90 +937,110 @@ private fun ServerRow(
         AppGraph.noteServerName(server.id, server.name)
     }
     val state by session.state.collectAsState()
+    val afkSeconds by session.afkSeconds.collectAsState()
     var showMenu by remember { mutableStateOf(false) }
 
     val isConnected = state == "connected"
-    val isWorking = state == "connecting" || state == "authenticating" || state == "reconnecting"
-    val statusLabel = when {
-        isConnected -> "Connected"
-        isWorking -> state.replaceFirstChar { it.uppercase() }
-        else -> "Offline"
+    LaunchedEffect(isConnected) {
+        while (isConnected) {
+            session.refreshCounters()
+            delay(60_000)
+        }
     }
-    val statusColor =
-        if (isConnected) MaterialTheme.colorScheme.primary
-        else if (isWorking) MaterialTheme.colorScheme.tertiary
-        else MaterialTheme.colorScheme.onSurfaceVariant
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
         onClick = { onSelect(server.id) },
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
         ) {
-            ServerAvatar(
-                host = server.host,
-                port = server.port,
-                name = server.name,
-                size = 48.dp,
-            )
-            Spacer(Modifier.width(10.dp))
-
-            Column(
-                Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            if (isConnected) {
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(Color(0xFF7FD18B)),
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(server.name, style = MaterialTheme.typography.titleMedium)
-                // Host with the status pill right next to it.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ServerAvatarStatus(
+                    host = server.host,
+                    port = server.port,
+                    name = server.name,
+                    state = state,
+                    size = 48.dp,
+                )
+                Spacer(Modifier.width(12.dp))
+
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        server.host,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        server.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isConnected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(statusColor.copy(alpha = 0.15f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(statusLabel, style = MaterialTheme.typography.labelMedium, color = statusColor)
+                        Text(
+                            server.host,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (isConnected) {
+                            Text(
+                                formatUptime(afkSeconds),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color(0xFF7FD18B),
+                            )
+                        }
                     }
                 }
-            }
 
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Server options")
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                        onClick = {
-                            showMenu = false
-                            onEdit()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        onClick = {
-                            showMenu = false
-                            onDelete()
-                        },
-                    )
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Server options")
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                onEdit()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                onDelete()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -738,7 +1050,13 @@ private fun ServerRow(
 /** Server icon shared by the main list and the drawer: live favicon when the
  *  server has one, initial-letter tile otherwise (memory-cached). */
 @Composable
-private fun ServerAvatar(host: String, port: Int, name: String, size: Dp) {
+private fun ServerAvatar(
+    host: String,
+    port: Int,
+    name: String,
+    size: Dp,
+    desaturate: Boolean = false,
+) {
     val cacheKey = "$host:$port"
     var favicon by remember(cacheKey) {
         mutableStateOf(faviconCache[cacheKey])
@@ -756,11 +1074,16 @@ private fun ServerAvatar(host: String, port: Int, name: String, size: Dp) {
         }
     }
 
+    val desatFilter = remember(desaturate) {
+        if (desaturate) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null
+    }
+
     if (favicon != null) {
         Image(
             bitmap = favicon!!.asImageBitmap(),
             contentDescription = "Server icon",
             contentScale = ContentScale.Fit,
+            colorFilter = desatFilter,
             modifier = Modifier
                 .size(size)
                 .clip(RoundedCornerShape(8.dp)),
@@ -770,12 +1093,16 @@ private fun ServerAvatar(host: String, port: Int, name: String, size: Dp) {
             Modifier
                 .size(size)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(
+                    if (desaturate) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    else MaterialTheme.colorScheme.surfaceVariant
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 name.take(1).uppercase(),
                 style = if (size >= 40.dp) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelLarge,
+                color = if (desaturate) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
         }
     }
@@ -839,16 +1166,29 @@ private fun ServerDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(draft.name, { onChange(draft.copy(name = it)) }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(draft.host, { onChange(draft.copy(host = it)) }, label = { Text("Host") }, singleLine = true)
                 OutlinedTextField(
-                    draft.port,
-                    { onChange(draft.copy(port = it)) },
+                    value = draft.name,
+                    onValueChange = { onChange(draft.copy(name = it)) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    colors = appOutlinedTextFieldColors(),
+                )
+                OutlinedTextField(
+                    value = draft.host,
+                    onValueChange = { onChange(draft.copy(host = it)) },
+                    label = { Text("Host") },
+                    singleLine = true,
+                    colors = appOutlinedTextFieldColors(),
+                )
+                OutlinedTextField(
+                    value = draft.port,
+                    onValueChange = { onChange(draft.copy(port = it)) },
                     label = { Text("Port") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = !draft.portValid,
-                    supportingText = if (!draft.portValid) { { Text("Port must be 1–65535") } } else null,
+                    supportingText = if (!draft.portValid) { { Text("Port must be 1\u201365535") } } else null,
+                    colors = appOutlinedTextFieldColors(),
                 )
                 Row(
                     Modifier.fillMaxWidth(),
@@ -856,15 +1196,16 @@ private fun ServerDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("Microsoft account (online mode)")
-                    Switch(checked = draft.onlineMode, onCheckedChange = { onChange(draft.copy(onlineMode = it)) })
+                    AppSwitch(checked = draft.onlineMode, onCheckedChange = { onChange(draft.copy(onlineMode = it)) })
                 }
                 if (!draft.onlineMode) {
                     OutlinedTextField(
-                        draft.username,
-                        { onChange(draft.copy(username = it)) },
+                        value = draft.username,
+                        onValueChange = { onChange(draft.copy(username = it)) },
                         label = { Text("Offline username") },
                         placeholder = { Text("AFKBot") },
                         singleLine = true,
+                        colors = appOutlinedTextFieldColors(),
                     )
                 }
             }
@@ -1002,7 +1343,10 @@ private fun ServerSettingsDialog(
                             )
                         }
                         Box {
-                            OutlinedButton(onClick = { protocolMenuOpen = true }) {
+                            OutlinedButton(
+                                onClick = { protocolMenuOpen = true },
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+                            ) {
                                 Text(
                                     VersionCatalog.nameOf(protocolValue)?.let { "$it ($protocolValue)" }
                                         ?: "Auto-detect",
@@ -1046,7 +1390,7 @@ private fun ServerSettingsDialog(
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text("View distance", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "Chunks loaded from the server (2–12). Lower saves battery and data; 2 is enough for AFK.",
+                                "Chunks loaded from the server (2\u201312). Lower saves battery and data; 2 is enough for AFK.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1058,10 +1402,11 @@ private fun ServerSettingsDialog(
                             singleLine = true,
                             modifier = Modifier.width(110.dp),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = appOutlinedTextFieldColors(),
                         )
                     }
                 }
-                HorizontalDivider()
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsSection("Chat") {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("Public chat", style = MaterialTheme.typography.bodyLarge)
@@ -1081,7 +1426,7 @@ private fun ServerSettingsDialog(
                         )
                     }
                 }
-                HorizontalDivider()
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsSection("Commands") {
                     OutlinedTextField(
                         value = chatCommandText,
@@ -1089,6 +1434,7 @@ private fun ServerSettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Command sent after spawning") },
                         singleLine = true,
+                        colors = appOutlinedTextFieldColors(),
                     )
                     OutlinedTextField(
                         value = delayText,
@@ -1097,6 +1443,7 @@ private fun ServerSettingsDialog(
                         label = { Text("Delay before command (seconds)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = appOutlinedTextFieldColors(),
                     )
                     Row(
                         Modifier.fillMaxWidth(),
@@ -1111,13 +1458,13 @@ private fun ServerSettingsDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
+                        AppSwitch(
                             checked = loopCommandValue,
                             onCheckedChange = { loopCommandValue = it },
                         )
                     }
                 }
-                HorizontalDivider()
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsSection("Automation") {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -1127,23 +1474,26 @@ private fun ServerSettingsDialog(
                         Column(Modifier.weight(1f)) {
                             Text("Auto-jump", style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "Jump every 25–40 s so anti-AFK plugins see movement.",
+                                "Jump every 25\u201340 s so anti-AFK plugins see movement.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
+                        AppSwitch(
                             checked = autoJumpValue,
                             onCheckedChange = { autoJumpValue = it },
                         )
                     }
                 }
-                HorizontalDivider()
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsSection("Account") {
-                    OutlinedButton(onClick = {
-                        session.clearToken()
-                        scope.launch { snackbarHostState.showSnackbar("Saved login token cleared") }
-                    }) {
+                    OutlinedButton(
+                        onClick = {
+                            session.clearToken()
+                            scope.launch { snackbarHostState.showSnackbar("Saved login token cleared") }
+                        },
+                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = null)
                         Text(" Clear token")
                     }
@@ -1321,7 +1671,10 @@ private fun SessionScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-            Card(Modifier.fillMaxWidth().animateContentSize()) {
+            Card(
+                modifier = Modifier.fillMaxWidth().animateContentSize(),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+            ) {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1371,7 +1724,7 @@ private fun SessionScreen(
                             Icon(Icons.Default.Settings, contentDescription = "Server settings")
                         }
                     }
-                    HorizontalDivider()
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1401,7 +1754,11 @@ private fun SessionScreen(
                                 )
                             }
                         }
-                        VerticalDivider(modifier = Modifier.height(36.dp))
+                        VerticalDivider(
+                            modifier = Modifier.height(36.dp),
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
                         Row(
                             Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1424,12 +1781,36 @@ private fun SessionScreen(
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
                                 )
-                                Text(
-                                    "↓${formatBytes(bytesIn)}  ↑${formatBytes(bytesOut)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = FontFamily.Monospace,
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDownward,
+                                        contentDescription = "Downloaded",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                    Text(
+                                        formatBytes(bytesIn),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowUpward,
+                                        contentDescription = "Uploaded",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                    Text(
+                                        formatBytes(bytesOut),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1516,6 +1897,7 @@ private fun SessionScreen(
             // exactly as before. No keyboard height is tracked manually.
             Card(
                 Modifier.fillMaxWidth().weight(1f).imePadding(),
+                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
             ) {
                 Column(Modifier.fillMaxSize().padding(12.dp)) {
                     Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -1574,6 +1956,13 @@ private fun SessionScreen(
                                 onValueChange = { chatInput = it },
                                 modifier = Modifier.weight(1f).focusRequester(chatFocusRequester),
                                 label = { Text("Type a message or /command") },
+                                shape = RoundedCornerShape(24.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    unfocusedBorderColor = StrongOutlineColor,
+                                    focusedBorderColor = Color(0xFF7FD18B),
+                                    focusedLabelColor = Color(0xFF7FD18B),
+                                    cursorColor = Color(0xFF7FD18B),
+                                ),
                                 minLines = 1,
                                 maxLines = 5,
                                 keyboardOptions = KeyboardOptions(

@@ -138,8 +138,8 @@ class ServerSession(private val context: Context, val serverId: Long) {
                 setState("connected")
                 _detail.value = buildString {
                     append("Online as ${snapshot.username.ifBlank { "bot" }}")
-                    if (lastAuthLabel.isNotBlank()) append(" · $lastAuthLabel")
-                    if (lastServerRef.isNotBlank()) append(" · $lastServerRef")
+                    if (lastAuthLabel.isNotBlank()) append(" \u00B7 $lastAuthLabel")
+                    if (lastServerRef.isNotBlank()) append(" \u00B7 $lastServerRef")
                 }
                 if (_authRequired.value != null) _authRequired.value = null
             }
@@ -147,14 +147,14 @@ class ServerSession(private val context: Context, val serverId: Long) {
                 setState("reconnecting")
                 val secs = (snapshot.reconnectInMs + 999) / 1000
                 val reason = snapshot.detail.ifBlank { "disconnected" }
-                _detail.value = "Reconnecting in ${secs}s — $reason"
+                _detail.value = "Reconnecting in ${secs}s \u2014 $reason"
             }
             Phase.CONNECTING, Phase.LOGGING_IN, Phase.CONFIGURING -> {
                 if (_state.value != "authenticating") setState("connecting")
                 _detail.value = when {
                     _authRequired.value != null -> "Sign in required"
-                    snapshot.phase == Phase.LOGGING_IN -> "Logging in…"
-                    else -> snapshot.detail.ifBlank { "Connecting to server…" }
+                    snapshot.phase == Phase.LOGGING_IN -> "Logging in\u2026"
+                    else -> snapshot.detail.ifBlank { "Connecting to server\u2026" }
                 }
             }
         }
@@ -180,7 +180,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
             registered = true
         }
         setState("connecting")
-        _detail.value = "Connecting to server…"
+        _detail.value = "Connecting to server\u2026"
         EngineHost.engine().startBot(botConfig)
     }
 
@@ -229,7 +229,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
     fun reconnect() {
         EngineHost.engine().reconnect(serverId)
         setState("connecting")
-        _detail.value = "Connecting to server…"
+        _detail.value = "Connecting to server\u2026"
     }
 
     fun sendChat(message: String, onError: (String) -> Unit = {}) {
