@@ -71,6 +71,10 @@ class AfkService : Service() {
             stopEverything()
             return START_NOT_STICKY
         }
+        if (intent.action == ACTION_RECONNECT_ALL) {
+            AppGraph.reconnectAllSessions()
+            return START_NOT_STICKY
+        }
         // ACTION_START. Only become a foreground service when a bot is
         // actually connecting/running: the Start button flips the session to
         // 'connecting' before sending this intent, so no active session here
@@ -129,6 +133,11 @@ class AfkService : Service() {
             Intent(this, AfkService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val reconnectService = PendingIntent.getService(
+            this, 2,
+            Intent(this, AfkService::class.java).setAction(ACTION_RECONNECT_ALL),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Java AFK NaNo active")
             .setContentText(names.joinToString(", "))
@@ -137,8 +146,15 @@ class AfkService : Service() {
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_menu_rotate),
+                    "Reconnect",
+                    reconnectService,
+                ).build(),
+            )
+            .addAction(
+                Notification.Action.Builder(
                     Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Stop service",
+                    "Stop All",
                     stopService,
                 ).build(),
             )
@@ -204,5 +220,6 @@ class AfkService : Service() {
         const val NOTIFICATION_ID = 1
         const val ACTION_START = "dev.mstheesha.afk.START"
         const val ACTION_STOP = "dev.mstheesha.afk.STOP"
+        const val ACTION_RECONNECT_ALL = "dev.mstheesha.afk.RECONNECT_ALL"
     }
 }

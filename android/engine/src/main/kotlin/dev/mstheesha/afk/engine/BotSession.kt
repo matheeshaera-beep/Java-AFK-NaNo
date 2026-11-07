@@ -626,12 +626,21 @@ internal class BotSession(
                 health = r.readFloat()
                 food = r.readVarInt()
                 publish()
+                if (config.disconnectOnLowHealth && phase == Phase.PLAYING && health > 0f && health <= config.lowHealthThreshold) {
+                    log("Emergency disconnect: health dropped to ${health.toInt()} (threshold ${config.lowHealthThreshold.toInt()})")
+                    stop()
+                }
             }
             id(P.PLAY_S2C_DEATH_COMBAT) -> {
-                val e = epoch
-                engine.schedule(this, 1_000) {
-                    if (epoch == e && phase == Phase.PLAYING && has(P.PLAY_C2S_CLIENT_COMMAND)) {
-                        conn?.send(id(P.PLAY_C2S_CLIENT_COMMAND)) { it.writeVarInt(0) }
+                if (config.disconnectOnDeath && phase == Phase.PLAYING) {
+                    log("Disconnected on death as requested in server settings")
+                    stop()
+                } else {
+                    val e = epoch
+                    engine.schedule(this, 1_000) {
+                        if (epoch == e && phase == Phase.PLAYING && has(P.PLAY_C2S_CLIENT_COMMAND)) {
+                            conn?.send(id(P.PLAY_C2S_CLIENT_COMMAND)) { it.writeVarInt(0) }
+                        }
                     }
                 }
             }
@@ -868,8 +877,25 @@ internal class BotSession(
             engine.notifyStopped(this)
             return
         }
+        if (config.disconnectOnKick) {
+            log("Disconnected on kick as requested in server settings")
+            stopped = true
+            epoch++
+            closeConnection()
+            phase = Phase.STOPPED
+            detail = text.take(200)
+            publish()
+            engine.notifyStopped(this)
+            return
+        }
+        val isRestart = RESTART_MARKERS.any { lower.contains(it) }
         val rateLimited = RATE_LIMIT_MARKERS.any { lower.contains(it) }
-        scheduleReconnect(text, if (rateLimited) 60_000L else -1L)
+        val fixedDelay = when {
+            isRestart -> 45_000L + random.nextInt(15_000) // 45–60s with randomized jitter for server restart
+            rateLimited -> 60_000L + random.nextInt(5_000)
+            else -> -1L
+        }
+        scheduleReconnect(text, fixedDelay)
     }
 
     private fun scheduleReconnect(reason: String, fixedDelay: Long = -1L) {
@@ -879,7 +905,15 @@ internal class BotSession(
         phase = Phase.RECONNECTING
         detail = reason.take(160)
         connected = false
-        val delay = if (fixedDelay > 0) fixedDelay else backoffMs
+        val baseDelay = if (fixedDelay > 0) fixedDelay else backoffMs
+        // Add ±15% jitter so multiple bots reconnecting do not cluster synchronously
+        val jitter = (baseDelay * 0.15).toLong()
+        val delay = if (jitter > 0) {
+            baseDelay + (random.nextInt((2 * jitter).toInt().coerceAtLeast(1)) - jitter)
+        } else {
+            baseDelay
+        }.coerceAtLeast(1_000L)
+
         backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
         reconnectInMs = delay
         publish()
@@ -1084,6 +1118,9 @@ internal class BotSession(
         )
         val RATE_LIMIT_MARKERS = listOf(
             "rate limit", "too fast", "slow down", "wait before", "throttl",
+        )
+        val RESTART_MARKERS = listOf(
+            "restart", "reboot", "server closed", "server is restarting", "shutting down", "maintenance", "reloading",
         )
     }
 }

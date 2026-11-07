@@ -1,6 +1,12 @@
 package dev.mstheesha.afk
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import dev.mstheesha.afk.engine.BotConfig
 import dev.mstheesha.afk.engine.BotListener
 import dev.mstheesha.afk.engine.BotSnapshot
@@ -40,6 +46,11 @@ class ServerSession(private val context: Context, val serverId: Long) {
     val logs = _logs
     val authRequired = _authRequired
     val chat = _chat
+
+    private val _health = MutableStateFlow(20f)
+    val health: StateFlow<Float> = _health
+    private val _food = MutableStateFlow(20)
+    val food: StateFlow<Int> = _food
 
     // Session-owned counters: survive UI navigation. Time accrues only while
     // 'connected'; reset only on Stop.
@@ -96,6 +107,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
     private fun pushChat(line: ChatLine) {
         val prev = _chat.value
         _chat.value = (prev + line).takeLast(500)
+        checkMentionNotification(line)
     }
 
     // ------------------------------------------------------------------ listener
@@ -123,6 +135,8 @@ class ServerSession(private val context: Context, val serverId: Long) {
         _bytesIn.value = snapshot.bytesIn
         _bytesOut.value = snapshot.bytesOut
         _sessionDataBytes.value = snapshot.bytesIn + snapshot.bytesOut
+        _health.value = snapshot.health
+        _food.value = snapshot.food
         kickedCount = snapshot.kicks
         when (snapshot.phase) {
             Phase.STOPPED -> {
@@ -202,6 +216,11 @@ class ServerSession(private val context: Context, val serverId: Long) {
             loopCommand = json.optBoolean("loopCommand", false),
             autoJump = json.optBoolean("autoJump", true),
             protocolOverride = json.optInt("protocolOverride", 0).coerceIn(0, 1_000_000),
+            disconnectOnLowHealth = json.optBoolean("disconnectOnLowHealth", false),
+            lowHealthThreshold = json.optDouble("lowHealthThreshold", 6.0).toFloat(),
+            disconnectOnDeath = json.optBoolean("disconnectOnDeath", false),
+            disconnectOnKick = json.optBoolean("disconnectOnKick", false),
+            notifyOnMention = json.optBoolean("notifyOnMention", true),
         )
     }
 
@@ -255,8 +274,8 @@ class ServerSession(private val context: Context, val serverId: Long) {
 
     /**
      * Pushes live settings to a running bot (chat visibility, commands, delays,
-     * view distance, auto-jump). The engine keeps the whole immutable config,
-     * so this replaces it atomically.
+     * view distance, auto-jump, safety disconnects). The engine keeps the whole
+     * immutable config, so this replaces it atomically.
      */
     fun pushLiveConfig(
         chatCommand: String,
@@ -265,6 +284,11 @@ class ServerSession(private val context: Context, val serverId: Long) {
         chatMode: String,
         autoJump: Boolean = config?.autoJump ?: true,
         loopCommand: Boolean = config?.loopCommand ?: false,
+        disconnectOnLowHealth: Boolean = config?.disconnectOnLowHealth ?: false,
+        lowHealthThreshold: Float = config?.lowHealthThreshold ?: 6f,
+        disconnectOnDeath: Boolean = config?.disconnectOnDeath ?: false,
+        disconnectOnKick: Boolean = config?.disconnectOnKick ?: false,
+        notifyOnMention: Boolean = config?.notifyOnMention ?: true,
     ) {
         val current = config ?: return
         val next = current.copy(
@@ -274,9 +298,73 @@ class ServerSession(private val context: Context, val serverId: Long) {
             chatMode = chatModeOf(chatMode),
             autoJump = autoJump,
             loopCommand = loopCommand,
+            disconnectOnLowHealth = disconnectOnLowHealth,
+            lowHealthThreshold = lowHealthThreshold,
+            disconnectOnDeath = disconnectOnDeath,
+            disconnectOnKick = disconnectOnKick,
+            notifyOnMention = notifyOnMention,
         )
         config = next
         EngineHost.engine().updateBot(next)
+    }
+
+    private fun checkMentionNotification(line: ChatLine) {
+        val conf = config ?: return
+        if (!conf.notifyOnMention) return
+        val myName = conf.username.trim()
+        if (myName.length < 3) return
+        // Do not notify on our own echoes
+        if (line.sender != null && line.sender.equals(myName, ignoreCase = true)) return
+        if (line.sender == "You") return
+
+        val isWhisper = line.type == "whisper"
+        val isMention = line.text.contains(myName, ignoreCase = true)
+        if (!isWhisper && !isMention) return
+
+        postMentionNotification(line)
+    }
+
+    private fun postMentionNotification(line: ChatLine) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= 26) {
+            val channel = NotificationChannel(
+                MENTION_CHANNEL_ID,
+                "Mentions & Whispers",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "Notifications when your username is mentioned in server chat"
+                enableVibration(true)
+            }
+            nm.createNotificationChannel(channel)
+        }
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            serverId.toInt(),
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val title = if (line.type == "whisper") {
+            line.sender?.let { "<$it> whispered" } ?: "Direct whisper received"
+        } else {
+            line.sender?.let { "<$it> mentioned you" } ?: "Mentioned in server chat"
+        }
+
+        val notification = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(context, MENTION_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(context)
+        }
+            .setContentTitle(title)
+            .setContentText(line.text)
+            .setSmallIcon(R.drawable.ic_stat_afk)
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .build()
+
+        nm.notify((1000 + serverId).toInt(), notification)
     }
 
     /** Chat arrives live through the listener; kept for call-site compatibility. */
@@ -302,5 +390,9 @@ class ServerSession(private val context: Context, val serverId: Long) {
         _afkSeconds.value = 0
         _sessionDataBytes.value = 0
         _authRequired.value = null
+    }
+
+    companion object {
+        const val MENTION_CHANNEL_ID = "afk_mentions"
     }
 }

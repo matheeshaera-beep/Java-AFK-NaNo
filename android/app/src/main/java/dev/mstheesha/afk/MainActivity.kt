@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -47,8 +48,18 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -314,6 +325,96 @@ fun appOutlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
     cursorColor = Color(0xFF7FD18B),
 )
 
+@Composable
+private fun MinecraftHudBar(
+    health: Float,
+    food: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Default.Favorite,
+                contentDescription = "Health",
+                tint = Color(0xFFFF4D4D),
+                modifier = Modifier.size(13.dp),
+            )
+            Text(
+                text = "${health.toInt()}/20",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFFF4D4D),
+            )
+            Spacer(Modifier.width(2.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                for (i in 0 until 10) {
+                    val hpForHeart = health - (i * 2)
+                    val color = when {
+                        hpForHeart >= 2f -> Color(0xFFFF3333)
+                        hpForHeart >= 1f -> Color(0xFFFF8888)
+                        else -> Color(0xFF442222)
+                    }
+                    Box(
+                        Modifier
+                            .size(width = 6.dp, height = 7.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(color),
+                    )
+                }
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                for (i in 0 until 10) {
+                    val foodForStick = food - (i * 2)
+                    val color = when {
+                        foodForStick >= 2 -> Color(0xFFD97706)
+                        foodForStick >= 1 -> Color(0xFFF59E0B)
+                        else -> Color(0xFF452B10)
+                    }
+                    Box(
+                        Modifier
+                            .size(width = 6.dp, height = 7.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(color),
+                    )
+                }
+            }
+            Spacer(Modifier.width(2.dp))
+            Text(
+                text = "$food/20",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFD97706),
+            )
+            Icon(
+                Icons.Default.Restaurant,
+                contentDescription = "Food",
+                tint = Color(0xFFD97706),
+                modifier = Modifier.size(13.dp),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
@@ -404,6 +505,7 @@ private fun DrawerContent(
     val servers by dao.all().collectAsState(initial = emptyList())
     val activeCount by AppGraph.activeCount.collectAsState(initial = 0)
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -617,6 +719,86 @@ private fun DrawerContent(
                     )
                     Text(
                         text = "Battery optimization",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
+
+                // Export servers row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (servers.isEmpty()) {
+                                Toast.makeText(context, "No servers to export", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val json = ServerBackup.exportToJson(servers)
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("Java AFK NaNo Servers", json))
+                                Toast.makeText(context, "Exported ${servers.size} servers to clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        Icons.Default.FileUpload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "Export servers (JSON)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
+
+                // Import servers row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            scope.launch {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = cm.primaryClip
+                                val text = clip?.getItemAt(0)?.text?.toString() ?: ""
+                                val imported = ServerBackup.importFromJson(text)
+                                if (imported.isEmpty()) {
+                                    Toast.makeText(context, "Clipboard has no valid server JSON", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    imported.forEach { dao.insert(it) }
+                                    Toast.makeText(context, "Imported ${imported.size} servers", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        Icons.Default.FileDownload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "Import servers (JSON)",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1102,6 +1284,13 @@ private fun ServerRow(
     var showMenu by remember { mutableStateOf(false) }
 
     val isConnected = state == "connected"
+    val context = LocalContext.current
+    var pingStatus by remember(server.host, server.port) { mutableStateOf<ServerPinger.ServerStatus?>(null) }
+    LaunchedEffect(server.host, server.port) {
+        withContext(Dispatchers.IO) {
+            pingStatus = ServerPinger.ping(server.host, server.port)
+        }
+    }
     LaunchedEffect(isConnected) {
         while (isConnected) {
             session.refreshCounters()
@@ -1167,6 +1356,39 @@ private fun ServerRow(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
+                        pingStatus?.let { ps ->
+                            if (ps.latencyMs >= 0) {
+                                val pingColor = when {
+                                    ps.latencyMs < 100 -> Color(0xFF7FD18B)
+                                    ps.latencyMs < 250 -> Color(0xFFF59E0B)
+                                    else -> Color(0xFFEF4444)
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = pingColor.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.dp, pingColor.copy(alpha = 0.4f)),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        Box(
+                                            Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(pingColor),
+                                        )
+                                        Text(
+                                            text = "${ps.latencyMs}ms",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                            color = pingColor,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (isConnected) {
                             Text(
                                 formatUptime(afkSeconds),
@@ -1177,30 +1399,60 @@ private fun ServerRow(
                     }
                 }
 
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Server options")
-                    }
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isActive = state in setOf("connecting", "connected", "reconnecting", "authenticating")
+                    IconButton(
+                        onClick = {
+                            if (isActive) {
+                                session.stop()
+                            } else {
+                                session.start(buildConfig(server))
+                                context.startForegroundService(
+                                    Intent(context, AfkService::class.java).setAction(AfkService.ACTION_START),
+                                )
+                            }
+                        },
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Edit") },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                showMenu = false
-                                onEdit()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = {
-                                showMenu = false
-                                onDelete()
-                            },
-                        )
+                        if (isActive) {
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = "Stop",
+                                tint = Color(0xFFE57373),
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Start",
+                                tint = Color(0xFF7FD18B),
+                            )
+                        }
+                    }
+
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Server options")
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit") },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                onClick = {
+                                    showMenu = false
+                                    onEdit()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = {
+                                    showMenu = false
+                                    onDelete()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1409,6 +1661,11 @@ private fun ServerSettingsDialog(
     var chatModeValue by remember(server.id) { mutableStateOf(server.chatMode) }
     var autoJumpValue by remember(server.id) { mutableStateOf(server.autoJump) }
     var loopCommandValue by remember(server.id) { mutableStateOf(server.loopCommand) }
+    var disconnectLowHealth by remember(server.id) { mutableStateOf(server.disconnectOnLowHealth) }
+    var lowHealthThreshold by remember(server.id) { mutableIntStateOf(server.lowHealthThreshold) }
+    var disconnectDeath by remember(server.id) { mutableStateOf(server.disconnectOnDeath) }
+    var disconnectKick by remember(server.id) { mutableStateOf(server.disconnectOnKick) }
+    var notifyMention by remember(server.id) { mutableStateOf(server.notifyOnMention) }
     // 0 = auto-detect. An unknown/legacy protocol is displayed as auto-detect
     // but is only overwritten in the DB once the user picks a version.
     var protocolValue by remember(server.id) {
@@ -1423,12 +1680,17 @@ private fun ServerSettingsDialog(
     var protocolPicked by remember(server.id) { mutableStateOf(false) }
     var protocolMenuOpen by remember(server.id) { mutableStateOf(false) }
     fun pushLive() = session.pushLiveConfig(
-        chatCommandText,
-        delayText.toIntOrNull() ?: server.commandDelaySeconds,
-        viewDistanceText.toIntOrNull() ?: server.viewDistance,
-        chatModeValue,
-        autoJumpValue,
-        loopCommandValue,
+        chatCommand = chatCommandText,
+        delaySeconds = delayText.toIntOrNull() ?: server.commandDelaySeconds,
+        viewDistance = viewDistanceText.toIntOrNull() ?: server.viewDistance,
+        chatMode = chatModeValue,
+        autoJump = autoJumpValue,
+        loopCommand = loopCommandValue,
+        disconnectOnLowHealth = disconnectLowHealth,
+        lowHealthThreshold = lowHealthThreshold.toFloat(),
+        disconnectOnDeath = disconnectDeath,
+        disconnectOnKick = disconnectKick,
+        notifyOnMention = notifyMention,
     )
     LaunchedEffect(chatCommandText) {
         if (chatCommandText != server.chatCommand) {
@@ -1478,6 +1740,41 @@ private fun ServerSettingsDialog(
         if (protocolPicked && protocolValue != server.protocolOverride) {
             delay(600)
             updateServerField(dao, server.id) { it.copy(protocolOverride = protocolValue) }
+        }
+    }
+    LaunchedEffect(disconnectLowHealth) {
+        if (disconnectLowHealth != server.disconnectOnLowHealth) {
+            delay(400)
+            updateServerField(dao, server.id) { it.copy(disconnectOnLowHealth = disconnectLowHealth) }
+            pushLive()
+        }
+    }
+    LaunchedEffect(lowHealthThreshold) {
+        if (lowHealthThreshold != server.lowHealthThreshold) {
+            delay(400)
+            updateServerField(dao, server.id) { it.copy(lowHealthThreshold = lowHealthThreshold) }
+            pushLive()
+        }
+    }
+    LaunchedEffect(disconnectDeath) {
+        if (disconnectDeath != server.disconnectOnDeath) {
+            delay(400)
+            updateServerField(dao, server.id) { it.copy(disconnectOnDeath = disconnectDeath) }
+            pushLive()
+        }
+    }
+    LaunchedEffect(disconnectKick) {
+        if (disconnectKick != server.disconnectOnKick) {
+            delay(400)
+            updateServerField(dao, server.id) { it.copy(disconnectOnKick = disconnectKick) }
+            pushLive()
+        }
+    }
+    LaunchedEffect(notifyMention) {
+        if (notifyMention != server.notifyOnMention) {
+            delay(400)
+            updateServerField(dao, server.id) { it.copy(notifyOnMention = notifyMention) }
+            pushLive()
         }
     }
     AlertDialog(
@@ -1647,6 +1944,101 @@ private fun ServerSettingsDialog(
                     }
                 }
                 HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsSection("Safety & Alerts") {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Disconnect on low health", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Disconnect immediately if health drops to protect gear.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        AppSwitch(
+                            checked = disconnectLowHealth,
+                            onCheckedChange = { disconnectLowHealth = it },
+                        )
+                    }
+                    if (disconnectLowHealth) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Threshold: ${lowHealthThreshold / 2} hearts (${lowHealthThreshold} HP)", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            OutlinedTextField(
+                                value = lowHealthThreshold.toString(),
+                                onValueChange = { lowHealthThreshold = it.toIntOrNull()?.coerceIn(1, 19) ?: lowHealthThreshold },
+                                label = { Text("HP (1-19)") },
+                                singleLine = true,
+                                modifier = Modifier.width(110.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = appOutlinedTextFieldColors(),
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Disconnect on death", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Do not auto-respawn if killed; disconnect cleanly instead.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        AppSwitch(
+                            checked = disconnectDeath,
+                            onCheckedChange = { disconnectDeath = it },
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Disconnect on kick", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Do not auto-reconnect if kicked from the server.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        AppSwitch(
+                            checked = disconnectKick,
+                            onCheckedChange = { disconnectKick = it },
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Notify on mentions & whispers", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "Vibrate and alert when your username is mentioned in chat.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        AppSwitch(
+                            checked = notifyMention,
+                            onCheckedChange = { notifyMention = it },
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsSection("Account") {
                     OutlinedButton(
                         onClick = {
@@ -1696,7 +2088,7 @@ private fun VersionMenuItem(label: String, selected: Boolean, onClick: () -> Uni
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 private fun SessionScreen(
     serverId: Long,
     snackbarHostState: SnackbarHostState,
@@ -1723,6 +2115,8 @@ private fun SessionScreen(
     val sessionData by session.sessionDataBytes.collectAsState()
     val bytesIn by session.bytesIn.collectAsState()
     val bytesOut by session.bytesOut.collectAsState()
+    val health by session.health.collectAsState()
+    val food by session.food.collectAsState()
     val scope = rememberCoroutineScope()
     val canStart = state == "disconnected" || state == "error"
 
@@ -1975,6 +2369,10 @@ private fun SessionScreen(
                             }
                         }
                     }
+                    if (state == "connected") {
+                        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        MinecraftHudBar(health = health, food = food)
+                    }
                 }
             }
 
@@ -2068,8 +2466,6 @@ private fun SessionScreen(
                         ) {
                             if (showChat) {
                                 items(chat, key = { "${it.seq}:${it.ts}:${it.text.hashCode()}" }) { line ->
-                                    // Belt and suspenders with cleanSender():
-                                    // a system line must never render "<null>".
                                     val sender = line.sender?.takeIf { it != "null" }?.let { "<$it> " } ?: ""
                                     val color = when (line.type) {
                                         "chat" -> MaterialTheme.colorScheme.onSurface
@@ -2079,12 +2475,31 @@ private fun SessionScreen(
                                         "out" -> MaterialTheme.colorScheme.primary
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
-                                    Text(
-                                        "$sender${line.text}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = color,
-                                    )
+                                    val fullRawText = "$sender${line.text}"
+                                    val formatted = remember(fullRawText, color) {
+                                        ChatFormatter.format(fullRawText, defaultColor = color)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .combinedClickable(
+                                                onClick = {},
+                                                onLongClick = {
+                                                    val clipboard = ctx.getSystemService(ClipboardManager::class.java)
+                                                    clipboard?.setPrimaryClip(
+                                                        ClipData.newPlainText("Chat message", line.text),
+                                                    )
+                                                    Toast.makeText(ctx, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                },
+                                            )
+                                            .padding(vertical = 2.dp),
+                                    ) {
+                                        Text(
+                                            text = formatted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    }
                                 }
                             } else {
                                 items(logs, key = { it.id }) { line ->
@@ -2107,10 +2522,45 @@ private fun SessionScreen(
                         }
                     }
                     if (showChat) {
+                        val macros = listOf("/afk", "/spawn", "/home", "/tpa yes", "/rules", "/ping")
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(macros) { cmd ->
+                                AssistChip(
+                                    onClick = {
+                                        if (state == "connected") {
+                                            session.sendChat(cmd) { err ->
+                                                scope.launch { snackbarHostState.showSnackbar(err) }
+                                            }
+                                        } else {
+                                            scope.launch { snackbarHostState.showSnackbar("Not connected") }
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            cmd,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        labelColor = Color(0xFF7FD18B),
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                )
+                            }
+                        }
+
                         Row(
                             verticalAlignment = Alignment.Bottom,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                         ) {
                             OutlinedTextField(
                                 value = chatInput,
@@ -2206,6 +2656,11 @@ private fun buildConfig(server: ServerEntity): String =
         .put("autoJump", server.autoJump)
         .put("loopCommand", server.loopCommand)
         .put("protocolOverride", server.protocolOverride.coerceIn(0, 1_000_000))
+        .put("disconnectOnLowHealth", server.disconnectOnLowHealth)
+        .put("lowHealthThreshold", server.lowHealthThreshold)
+        .put("disconnectOnDeath", server.disconnectOnDeath)
+        .put("disconnectOnKick", server.disconnectOnKick)
+        .put("notifyOnMention", server.notifyOnMention)
         .toString()
 
 private val CALLABLE_CHAT_MODES = setOf("enabled", "commandsOnly", "messagesOnly", "hidden")

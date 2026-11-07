@@ -31,6 +31,11 @@ data class ServerEntity(
     val loopCommand: Boolean = false,
     /** 0 = auto-detect via Server List Ping, otherwise a fixed protocol number. */
     val protocolOverride: Int = 0,
+    val disconnectOnLowHealth: Boolean = false,
+    val lowHealthThreshold: Int = 6,
+    val disconnectOnDeath: Boolean = false,
+    val disconnectOnKick: Boolean = false,
+    val notifyOnMention: Boolean = true,
 )
 
 @Dao
@@ -55,7 +60,7 @@ interface ServerDao {
     suspend fun delete(server: ServerEntity)
 }
 
-@Database(entities = [ServerEntity::class], version = 7, exportSchema = false)
+@Database(entities = [ServerEntity::class], version = 8, exportSchema = false)
 abstract class AfkDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
 
@@ -100,6 +105,16 @@ abstract class AfkDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE servers ADD COLUMN disconnectOnLowHealth INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN lowHealthThreshold INTEGER NOT NULL DEFAULT 6")
+                db.execSQL("ALTER TABLE servers ADD COLUMN disconnectOnDeath INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN disconnectOnKick INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN notifyOnMention INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         fun get(context: Context): AfkDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -113,6 +128,7 @@ abstract class AfkDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                     .build().also { instance = it }
             }

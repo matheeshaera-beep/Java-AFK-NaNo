@@ -23,6 +23,11 @@ data class BotConfig(
     val loopCommand: Boolean = false,
     val autoJump: Boolean = true,
     val protocolOverride: Int = 0,
+    val disconnectOnLowHealth: Boolean = false,
+    val lowHealthThreshold: Float = 6f,
+    val disconnectOnDeath: Boolean = false,
+    val disconnectOnKick: Boolean = false,
+    val notifyOnMention: Boolean = true,
 )
 
 /** One immutable view of a bot, pushed to the UI on every meaningful change. */

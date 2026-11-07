@@ -41,8 +41,8 @@ android {
         applicationId = "dev.mstheesha.afk.java"
         minSdk = 35
         targetSdk = 36
-        versionCode = 14
-        versionName = "3.3"
+        versionCode = 15
+        versionName = "3.4"
     }
 
     buildTypes {
@@ -99,6 +99,15 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.5")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
+    testImplementation(kotlin("test"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testImplementation("org.json:json:20240303")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }
 
 tasks.withType<JavaCompile>().configureEach {

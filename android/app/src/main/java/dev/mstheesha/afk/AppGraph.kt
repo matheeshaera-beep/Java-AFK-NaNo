@@ -89,6 +89,14 @@ object AppGraph {
         all.forEach { it.stop() }
     }
 
+    /** Reconnects all sessions currently running or trying to run. */
+    fun reconnectAllSessions() {
+        val active = synchronized(sessions) {
+            sessions.values.filter { it.state.value in ACTIVE_STATES }
+        }
+        active.forEach { it.reconnect() }
+    }
+
     /**
      * A session starts being "active" when it leaves 'disconnected' (a start or
      * reconnect was requested) and returns to idle once stopped/disconnected.

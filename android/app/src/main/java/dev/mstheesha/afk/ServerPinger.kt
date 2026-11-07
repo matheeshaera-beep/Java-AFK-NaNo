@@ -2,11 +2,13 @@ package dev.mstheesha.afk
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 
 object ServerPinger {
     /** Status JSON is ~50 KB with a favicon; anything far larger is hostile. */
@@ -16,33 +18,41 @@ object ServerPinger {
     private const val MAX_FAVICON_BYTES = 300_000
     private const val MAX_FAVICON_EDGE = 1024
 
+    data class ServerStatus(
+        val latencyMs: Long,
+        val onlinePlayers: Int,
+        val maxPlayers: Int,
+        val motd: String,
+        val favicon: Bitmap?,
+    )
+
+    // In-memory cache of ping results: (host:port -> Status to timestamp)
+    private val statusCache = ConcurrentHashMap<String, Pair<Long, ServerStatus>>()
+
     fun fetchFavicon(host: String, port: Int): Bitmap? {
-        return try {
-            val response = statusResponse(host, port) ?: return null
-            val base64 = faviconBase64(response) ?: return null
-            decodeFavicon(base64)
-        } catch (e: Exception) {
-            null
+        val cached = statusCache["$host:$port"]?.second?.favicon
+        if (cached != null) return cached
+        return ping(host, port)?.favicon
+    }
+
+    /**
+     * Executes one Server List Ping to retrieve latency, player counts and MOTD.
+     * Caches results for 60 seconds so server cards do not generate constant polling or network spam.
+     */
+    fun ping(host: String, port: Int, forceFresh: Boolean = false): ServerStatus? {
+        val key = "$host:$port"
+        val cached = statusCache[key]
+        val now = System.currentTimeMillis()
+        if (!forceFresh && cached != null && now - cached.first < 60_000L) {
+            return cached.second
         }
-    }
 
-    private fun decodeFavicon(base64: String): Bitmap? {
-        if (base64.length > MAX_FAVICON_CHARS) return null
-        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-        if (bytes.size > MAX_FAVICON_BYTES) return null
-        // Reject huge dimensions before decoding the pixels.
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth !in 1..MAX_FAVICON_EDGE) return null
-        if (bounds.outHeight !in 1..MAX_FAVICON_EDGE) return null
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    }
-
-    private fun statusResponse(host: String, port: Int): String? {
         val socket = Socket()
         return try {
-            socket.connect(InetSocketAddress(host, port), 3000)
-            socket.soTimeout = 3000
+            val start = System.currentTimeMillis()
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(host, port), 2500)
+            socket.soTimeout = 2500
             val out = DataOutputStream(socket.getOutputStream())
             val inp = DataInputStream(socket.getInputStream())
 
@@ -69,12 +79,49 @@ object ServerPinger {
             if (jsonLen < 0 || jsonLen > packetLen || jsonLen > MAX_JSON_BYTES) return null
             val jsonBytes = ByteArray(jsonLen)
             inp.readFully(jsonBytes)
-            String(jsonBytes, Charsets.UTF_8)
-        } catch (e: Exception) {
+            val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
+            val jsonStr = String(jsonBytes, Charsets.UTF_8)
+
+            val status = parseStatus(jsonStr, latency)
+            if (status != null) {
+                statusCache[key] = now to status
+            }
+            status
+        } catch (_: Exception) {
             null
         } finally {
-            try { socket.close() } catch (e: Exception) {}
+            try { socket.close() } catch (_: Exception) {}
         }
+    }
+
+    private fun parseStatus(jsonStr: String, latencyMs: Long): ServerStatus? = try {
+        val root = JSONObject(jsonStr)
+        val players = root.optJSONObject("players")
+        val online = players?.optInt("online", -1) ?: -1
+        val max = players?.optInt("max", -1) ?: -1
+        val motdObj = root.opt("description")
+        val motd = when (motdObj) {
+            is String -> motdObj
+            is JSONObject -> motdObj.optString("text")
+            null -> ""
+            else -> ""
+        }
+        val faviconB64 = faviconBase64(jsonStr)
+        val bitmap = faviconB64?.let { decodeFavicon(it) }
+        ServerStatus(latencyMs, online, max, motd, bitmap)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun decodeFavicon(base64: String): Bitmap? {
+        if (base64.length > MAX_FAVICON_CHARS) return null
+        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        if (bytes.size > MAX_FAVICON_BYTES) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth !in 1..MAX_FAVICON_EDGE) return null
+        if (bounds.outHeight !in 1..MAX_FAVICON_EDGE) return null
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     private fun faviconBase64(json: String): String? {
@@ -104,21 +151,23 @@ object ServerPinger {
         }
     }
 
-    private fun readVarInt(inp: DataInputStream): Int {
-        var result = 0
-        var shift = 0
-        while (true) {
-            val b = inp.readUnsignedByte()
-            result = result or ((b and 0x7F) shl shift)
-            if (b and 0x80 == 0) return result
-            shift += 7
-            if (shift > 35) throw Exception("VarInt too big")
-        }
-    }
-
     private fun writeString(out: DataOutputStream, s: String) {
         val bytes = s.toByteArray(Charsets.UTF_8)
         writeVarInt(out, bytes.size)
         out.write(bytes)
+    }
+
+    private fun readVarInt(inp: DataInputStream): Int {
+        var numRead = 0
+        var result = 0
+        var read: Byte
+        do {
+            read = inp.readByte()
+            val value = (read.toInt() and 0x7F)
+            result = result or (value shl (7 * numRead))
+            numRead++
+            if (numRead > 5) throw IllegalArgumentException("VarInt is too big")
+        } while ((read.toInt() and 0x80) != 0)
+        return result
     }
 }
