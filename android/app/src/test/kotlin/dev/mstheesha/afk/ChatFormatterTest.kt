@@ -53,4 +53,17 @@ class ChatFormatterTest {
         val result = ChatFormatter.format("Hello §", Color.White)
         assertEquals("Hello §", result.text)
     }
+
+    @Test
+    fun preservesNormalAmpersands() {
+        val input = "Q&A at B&B — https://example.com/?a=1&b=2&c=3"
+        val result = ChatFormatter.format(input, Color.White)
+        assertEquals(input, result.text)
+    }
+
+    @Test
+    fun preservesCaseOfUnrecognizedSectionCode() {
+        val result = ChatFormatter.format("Keep §X and §Z intact", Color.White)
+        assertEquals("Keep §X and §Z intact", result.text)
+    }
 }

@@ -77,4 +77,24 @@ class ServerBackupTest {
         val result = ServerBackup.importFromJson("invalid json text {{{")
         assertTrue(result.isEmpty())
     }
+
+    @Test
+    fun stripsAuthCommandsOnExport() {
+        val server = ServerEntity(
+            id = 1L,
+            name = "Cracked SMP",
+            host = "smp.example.com",
+            port = 25565,
+            chatCommand = "/login superSecret123\n/register pass123 pass123\n/l mypass\n/afk\n/warp farm",
+            commandDelaySeconds = 5,
+            onlineMode = false,
+            username = "Bot",
+        )
+        val json = ServerBackup.exportToJson(listOf(server))
+        assertFalse(json.contains("superSecret123"))
+        assertFalse(json.contains("pass123"))
+        assertFalse(json.contains("mypass"))
+        assertTrue(json.contains("/afk"))
+        assertTrue(json.contains("/warp farm"))
+    }
 }

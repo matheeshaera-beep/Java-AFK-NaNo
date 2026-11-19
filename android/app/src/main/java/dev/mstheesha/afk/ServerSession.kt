@@ -19,8 +19,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Per-server view of one engine bot. The engine pushes [BotSnapshot], log and
@@ -53,7 +54,8 @@ class ServerSession(private val context: Context, val serverId: Long) {
     val food: StateFlow<Int> = _food
 
     // Session-owned counters: survive UI navigation. Time accrues only while
-    // 'connected'; reset only on Stop.
+    // 'connected'; reset only on Stop. Guarded by counterLock.
+    private val counterLock = Any()
     private val _afkSeconds = MutableStateFlow(0L)
     val afkSeconds: StateFlow<Long> = _afkSeconds
     private val _sessionDataBytes = MutableStateFlow(0L)
@@ -70,43 +72,63 @@ class ServerSession(private val context: Context, val serverId: Long) {
     var kickedCount = 0
         private set
 
+    @Volatile
+    private var activeUsername = ""
+    @Volatile
     private var lastAuthLabel = ""
+    @Volatile
     private var lastServerRef = ""
+    @Volatile
     private var config: BotConfig? = null
+    @Volatile
     private var registered = false
 
     /** All state transitions go through here for connected-time accounting. */
     private fun setState(s: String) {
-        if (_state.value == s) return
-        val now = System.currentTimeMillis()
-        if (_state.value == "connected" && connectedAtMs > 0) {
-            accumulatedMs += now - connectedAtMs
-            connectedAtMs = 0
+        synchronized(counterLock) {
+            if (_state.value == s) return
+            val now = System.currentTimeMillis()
+            if (_state.value == "connected" && connectedAtMs > 0) {
+                accumulatedMs += now - connectedAtMs
+                connectedAtMs = 0
+            }
+            _state.value = s
+            if (s == "connected" && connectedAtMs == 0L) connectedAtMs = now
+            refreshCountersLocked(now)
         }
-        _state.value = s
-        if (s == "connected" && connectedAtMs == 0L) connectedAtMs = now
-        refreshCounters()
     }
 
     /** Recomputes the visible counters; the UI calls this from its 1 s ticker. */
     fun refreshCounters() {
-        val now = System.currentTimeMillis()
+        synchronized(counterLock) {
+            refreshCountersLocked(System.currentTimeMillis())
+        }
+    }
+
+    private fun refreshCountersLocked(now: Long) {
         val extra = if (_state.value == "connected" && connectedAtMs > 0) now - connectedAtMs else 0
         _afkSeconds.value = (accumulatedMs + extra) / 1000
     }
 
+    private fun resetCounters() {
+        synchronized(counterLock) {
+            accumulatedMs = 0
+            connectedAtMs = 0
+            _afkSeconds.value = 0
+        }
+    }
+
     data class LogLine(val id: Long, val text: String)
 
-    private var nextLocalLogId = -1L
+    private val nextLocalLogId = AtomicLong(-1L)
 
     private fun pushLog(line: String) {
-        val prev = _logs.value
-        _logs.value = (prev + LogLine(nextLocalLogId--, line)).takeLast(500)
+        val id = nextLocalLogId.getAndDecrement()
+        _logs.update { (it + LogLine(id, line)).takeLast(500) }
     }
 
     private fun pushChat(line: ChatLine) {
-        val prev = _chat.value
-        _chat.value = (prev + line).takeLast(500)
+        _chat.update { (it + line).takeLast(500) }
         checkMentionNotification(line)
     }
 
@@ -132,6 +154,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
     }
 
     private fun applySnapshot(snapshot: BotSnapshot) {
+        if (snapshot.username.isNotBlank()) activeUsername = snapshot.username
         _bytesIn.value = snapshot.bytesIn
         _bytesOut.value = snapshot.bytesOut
         _sessionDataBytes.value = snapshot.bytesIn + snapshot.bytesOut
@@ -176,18 +199,15 @@ class ServerSession(private val context: Context, val serverId: Long) {
 
     // ============ PUBLIC API ============
 
-    fun start(configJson: String) {
-        val json = JSONObject(configJson)
-        lastAuthLabel = if (json.optString("auth") == "microsoft") "Microsoft account" else "Offline mode"
-        lastServerRef = json.optString("host") + ":" + json.optInt("port", 25565)
-        accumulatedMs = 0
-        connectedAtMs = 0
-        _afkSeconds.value = 0
+    fun start(botConfig: BotConfig) {
+        lastAuthLabel = if (botConfig.onlineMode) "Microsoft account" else "Offline mode"
+        lastServerRef = "${botConfig.host}:${botConfig.port}"
+        activeUsername = botConfig.username
+        resetCounters()
         _sessionDataBytes.value = 0
         _bytesIn.value = 0
         _bytesOut.value = 0
         _authRequired.value = null
-        val botConfig = parseConfig(json)
         config = botConfig
         if (!registered) {
             EngineHost.register(serverId, listener)
@@ -198,46 +218,11 @@ class ServerSession(private val context: Context, val serverId: Long) {
         EngineHost.engine().startBot(botConfig)
     }
 
-    private fun parseConfig(json: JSONObject): BotConfig {
-        val commands = json.optString("chatCommand")
-            .split('\n')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        return BotConfig(
-            id = serverId,
-            host = json.optString("host"),
-            port = json.optInt("port", 25565),
-            username = json.optString("username").ifBlank { "AFKBot" },
-            onlineMode = json.optString("auth") == "microsoft",
-            viewDistance = json.optInt("viewDistance", 2).coerceIn(2, 12),
-            chatMode = chatModeOf(json.optString("chatMode", "enabled")),
-            commands = commands,
-            commandDelaySeconds = json.optInt("commandDelaySeconds", 5).coerceIn(1, 3600),
-            loopCommand = json.optBoolean("loopCommand", false),
-            autoJump = json.optBoolean("autoJump", true),
-            protocolOverride = json.optInt("protocolOverride", 0).coerceIn(0, 1_000_000),
-            disconnectOnLowHealth = json.optBoolean("disconnectOnLowHealth", false),
-            lowHealthThreshold = json.optDouble("lowHealthThreshold", 6.0).toFloat(),
-            disconnectOnDeath = json.optBoolean("disconnectOnDeath", false),
-            disconnectOnKick = json.optBoolean("disconnectOnKick", false),
-            notifyOnMention = json.optBoolean("notifyOnMention", true),
-        )
-    }
-
-    private fun chatModeOf(value: String): ChatMode = when (value) {
-        "commandsOnly" -> ChatMode.COMMANDS_ONLY
-        "messagesOnly" -> ChatMode.MESSAGES_ONLY
-        "hidden" -> ChatMode.HIDDEN
-        else -> ChatMode.ALL
-    }
-
     fun stop() {
         EngineHost.engine().stopBot(serverId)
         setState("disconnected")
         _detail.value = ""
-        accumulatedMs = 0
-        connectedAtMs = 0
-        _afkSeconds.value = 0
+        resetCounters()
         _sessionDataBytes.value = 0
         _bytesIn.value = 0
         _bytesOut.value = 0
@@ -263,7 +248,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
         // always showed it as <You>.
         pushChat(
             ChatLine(
-                seq = nextLocalLogId--.toInt(),
+                seq = nextLocalLogId.getAndDecrement().toInt(),
                 ts = System.currentTimeMillis(),
                 type = "chat",
                 sender = "You",
@@ -311,20 +296,21 @@ class ServerSession(private val context: Context, val serverId: Long) {
     private fun checkMentionNotification(line: ChatLine) {
         val conf = config ?: return
         if (!conf.notifyOnMention) return
-        val myName = conf.username.trim()
+        val myName = activeUsername.ifBlank { conf.username }.trim()
         if (myName.length < 3) return
         // Do not notify on our own echoes
         if (line.sender != null && line.sender.equals(myName, ignoreCase = true)) return
         if (line.sender == "You") return
 
+        val plainText = line.text.replace(SECTION_CODE_REGEX, "")
         val isWhisper = line.type == "whisper"
-        val isMention = line.text.contains(myName, ignoreCase = true)
+        val isMention = plainText.contains(myName, ignoreCase = true)
         if (!isWhisper && !isMention) return
 
-        postMentionNotification(line)
+        postMentionNotification(line, plainText)
     }
 
-    private fun postMentionNotification(line: ChatLine) {
+    private fun postMentionNotification(line: ChatLine, plainText: String) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (Build.VERSION.SDK_INT >= 26) {
             val channel = NotificationChannel(
@@ -358,7 +344,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
             Notification.Builder(context)
         }
             .setContentTitle(title)
-            .setContentText(line.text)
+            .setContentText(plainText)
             .setSmallIcon(R.drawable.ic_stat_afk)
             .setContentIntent(openApp)
             .setAutoCancel(true)
@@ -366,11 +352,6 @@ class ServerSession(private val context: Context, val serverId: Long) {
 
         nm.notify((1000 + serverId).toInt(), notification)
     }
-
-    /** Chat arrives live through the listener; kept for call-site compatibility. */
-    fun setChatPolling(enabled: Boolean) = Unit
-
-    fun refreshChatNow() = Unit
 
     fun clearToken() {
         scope.launch {
@@ -385,14 +366,20 @@ class ServerSession(private val context: Context, val serverId: Long) {
         registered = false
         setState("disconnected")
         _detail.value = ""
-        accumulatedMs = 0
-        connectedAtMs = 0
-        _afkSeconds.value = 0
+        resetCounters()
         _sessionDataBytes.value = 0
         _authRequired.value = null
     }
 
     companion object {
         const val MENTION_CHANNEL_ID = "afk_mentions"
+        private val SECTION_CODE_REGEX = Regex("§.")
+
+        fun chatModeOf(value: String): ChatMode = when (value) {
+            "commandsOnly" -> ChatMode.COMMANDS_ONLY
+            "messagesOnly" -> ChatMode.MESSAGES_ONLY
+            "hidden" -> ChatMode.HIDDEN
+            else -> ChatMode.ALL
+        }
     }
 }

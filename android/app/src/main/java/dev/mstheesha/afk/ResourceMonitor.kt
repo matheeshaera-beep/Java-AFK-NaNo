@@ -6,7 +6,7 @@ import android.content.Context
 import android.net.TrafficStats
 import java.io.File
 
-// Usage of THIS app's process only (Compose UI + Go engine + native libs).
+// Usage of THIS app's process only (Compose UI + Kotlin AFK engine).
 // CPU and RAM come from /proc/self (the app process), network from this app's
 // UID. No device-wide readings, no reliance on /sys/class/kgsl.
 

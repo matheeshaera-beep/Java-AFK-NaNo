@@ -19,41 +19,93 @@ internal object ChatText {
         "commands.message.display.outgoing" to "You whisper to %s: %s",
     )
 
-    fun fromJson(json: String): String = try {
-        flatten(Json.parse(json))
+    private val NAMED_COLORS = mapOf(
+        "black" to '0',
+        "dark_blue" to '1',
+        "dark_green" to '2',
+        "dark_aqua" to '3',
+        "dark_red" to '4',
+        "dark_purple" to '5',
+        "gold" to '6',
+        "gray" to '7',
+        "dark_gray" to '8',
+        "blue" to '9',
+        "green" to 'a',
+        "aqua" to 'b',
+        "red" to 'c',
+        "light_purple" to 'd',
+        "yellow" to 'e',
+        "white" to 'f',
+    )
+
+    fun fromJson(json: String, styled: Boolean = false): String = try {
+        flatten(Json.parse(json), styled)
     } catch (e: Exception) {
         json
     }
 
-    fun fromNbt(reader: PacketReader, namedRoot: Boolean): String = try {
-        flatten(Nbt.read(reader, namedRoot))
+    fun fromNbt(reader: PacketReader, namedRoot: Boolean, styled: Boolean = false): String = try {
+        flatten(Nbt.read(reader, namedRoot), styled)
     } catch (e: Exception) {
         ""
     }
 
-    fun flatten(value: Any?): String = when (value) {
+    fun flatten(value: Any?, styled: Boolean = false): String = when (value) {
         null -> ""
         is String -> value
         is Number, is Boolean -> value.toString()
-        is List<*> -> value.joinToString("") { flatten(it) }
-        is Map<*, *> -> flattenComponent(value)
+        is List<*> -> value.joinToString("") { flatten(it, styled) }
+        is Map<*, *> -> flattenComponent(value, styled)
         else -> ""
     }
 
-    private fun flattenComponent(map: Map<*, *>): String {
+    private fun flattenComponent(map: Map<*, *>, styled: Boolean): String {
         val sb = StringBuilder()
+        var appliedStyle = false
+        if (styled) {
+            val colorName = (map["color"] as? String)?.lowercase()
+            val colorCode = colorName?.let { NAMED_COLORS[it] }
+            if (colorCode != null) {
+                sb.append('§').append(colorCode)
+                appliedStyle = true
+            }
+            if (isTruthy(map["bold"])) {
+                sb.append("§l")
+                appliedStyle = true
+            }
+            if (isTruthy(map["italic"])) {
+                sb.append("§o")
+                appliedStyle = true
+            }
+            if (isTruthy(map["underlined"])) {
+                sb.append("§n")
+                appliedStyle = true
+            }
+            if (isTruthy(map["strikethrough"])) {
+                sb.append("§m")
+                appliedStyle = true
+            }
+        }
         val text = map["text"]
-        if (text != null) sb.append(flatten(text))
+        if (text != null) sb.append(flatten(text, styled))
         val translate = map["translate"] as? String
         if (translate != null) {
-            val args = (map["with"] as? List<*>)?.map { flatten(it) } ?: emptyList()
+            val args = (map["with"] as? List<*>)?.map { flatten(it, styled) } ?: emptyList()
             sb.append(translate(translate, args))
         }
         val extra = map["extra"] as? List<*>
-        if (extra != null) for (part in extra) sb.append(flatten(part))
+        if (extra != null) for (part in extra) sb.append(flatten(part, styled))
         // Fall back to a bare "contents" component (1.21.5+ item/entity names).
-        if (sb.isEmpty() && map["contents"] != null) sb.append(flatten(map["contents"]))
+        if (sb.isEmpty() && map["contents"] != null) sb.append(flatten(map["contents"], styled))
+        if (appliedStyle && sb.length > 2) sb.append("§r")
         return sb.toString()
+    }
+
+    private fun isTruthy(value: Any?): Boolean = when (value) {
+        is Boolean -> value
+        is Number -> value.toInt() != 0
+        is String -> value.equals("true", ignoreCase = true)
+        else -> false
     }
 
     private fun translate(key: String, args: List<String>): String {

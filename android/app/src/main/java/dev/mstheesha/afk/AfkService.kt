@@ -75,11 +75,11 @@ class AfkService : Service() {
             AppGraph.reconnectAllSessions()
             return START_NOT_STICKY
         }
-        // ACTION_START. Only become a foreground service when a bot is
-        // actually connecting/running: the Start button flips the session to
-        // 'connecting' before sending this intent, so no active session here
-        // means the start did not take and there is nothing to keep alive.
+        // ACTION_START was dispatched via startForegroundService(): on Android 12+,
+        // every startForegroundService() call MUST invoke startForeground() before
+        // stopping, otherwise the system throws ForegroundServiceDidNotStartInTimeException.
         if (!AppGraph.hasActiveSessions()) {
+            if (!foregroundStarted) startForegroundInternal(listOf("Stopping\u2026"))
             stopEverything()
             return START_NOT_STICKY
         }
@@ -107,12 +107,17 @@ class AfkService : Service() {
     }
 
     private fun startForegroundCompat() {
-        // No active session means no notification: never post a placeholder.
         val names = AppGraph.activeServerNames()
         if (names.isEmpty()) {
+            if (!foregroundStarted) startForegroundInternal(listOf("Stopping\u2026"))
             stopEverything()
             return
         }
+        startForegroundInternal(names)
+        acquireWakeLock()
+    }
+
+    private fun startForegroundInternal(names: List<String>) {
         val notification = buildNotification(names)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -120,7 +125,6 @@ class AfkService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         foregroundStarted = true
-        acquireWakeLock()
     }
 
     private fun buildNotification(names: List<String>): Notification {

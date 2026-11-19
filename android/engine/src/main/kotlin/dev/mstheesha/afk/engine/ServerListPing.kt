@@ -5,16 +5,37 @@ import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
-/** Server List Ping: used to detect the protocol version before logging in. */
-internal object ServerListPing {
+/** Server List Ping: used to detect the protocol version and query server status. */
+object ServerListPing {
     data class Result(
         val protocol: Int,
         val versionName: String,
         val motd: String,
         val favicon: String?,
+        val latencyMs: Long = -1L,
+        val onlinePlayers: Int = -1,
+        val maxPlayers: Int = -1,
     )
 
-    fun ping(host: String, port: Int, timeoutMs: Int = 6_000): Result {
+    /** Resolves `_minecraft._tcp` SRV records before pinging, matching vanilla behavior. */
+    fun pingWithSrv(host: String, port: Int, timeoutMs: Int = 6_000): Result {
+        val target = HostPolicy.resolve(host, port)
+        return ping(
+            host = target.host,
+            port = target.port,
+            timeoutMs = timeoutMs,
+            handshakeHost = host,
+            handshakePort = port,
+        )
+    }
+
+    fun ping(
+        host: String,
+        port: Int,
+        timeoutMs: Int = 6_000,
+        handshakeHost: String = host,
+        handshakePort: Int = port,
+    ): Result {
         val socket = Socket()
         try {
             socket.tcpNoDelay = true
@@ -26,17 +47,19 @@ internal object ServerListPing {
             val handshake = PacketWriter(128)
             handshake.writeVarInt(0) // handshake
             handshake.writeVarInt(-1) // "unknown" protocol: ask the server
-            handshake.writeString(host)
-            handshake.writeShort(port)
+            handshake.writeString(handshakeHost)
+            handshake.writeShort(handshakePort)
             handshake.writeVarInt(1) // status
             writeFrame(out, handshake)
 
             val request = PacketWriter(8)
             request.writeVarInt(0)
+            val reqStart = System.nanoTime()
             writeFrame(out, request)
             out.flush()
 
             val length = readVarInt(input)
+            val latencyMs = ((System.nanoTime() - reqStart) / 1_000_000L).coerceAtLeast(1L)
             if (length <= 0 || length > 1 shl 21) throw ProtocolException("bad status length $length")
             val body = ByteArray(length)
             input.readFully(body)
@@ -50,7 +73,10 @@ internal object ServerListPing {
             val name = version?.str("name") ?: ""
             val motd = ChatText.flatten(root["description"])
             val favicon = root.str("favicon")
-            return Result(protocol, name, motd, favicon)
+            val players = root.obj("players")
+            val online = players?.int("online") ?: -1
+            val max = players?.int("max") ?: -1
+            return Result(protocol, name, motd, favicon, latencyMs, online, max)
         } finally {
             try {
                 socket.close()

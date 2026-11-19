@@ -193,7 +193,7 @@ class AfkEngine(
                     lastPublish = now
                     for (bot in bots.values) bot.pushNow()
                 }
-                selector.select(nextTimeout().toLong())
+                selector.select(nextTimeout())
                 val keys = selector.selectedKeys()
                 val iterator = keys.iterator()
                 while (iterator.hasNext()) {
@@ -274,6 +274,7 @@ class AfkEngine(
                 command.bot.key?.cancel()
                 command.bot.key = null
                 listeners.remove(command.bot.id)
+                if (bots.isEmpty()) Compression.shrink()
             }
             is Command.Shutdown -> running = false
         }
@@ -301,6 +302,7 @@ class AfkEngine(
         bot.key?.cancel()
         bot.key = null
         listeners.remove(id)
+        if (bots.isEmpty()) Compression.shrink()
     }
 
     private fun attach(command: Command.Connected) {
@@ -374,10 +376,11 @@ class AfkEngine(
         key.interestOps(SelectionKey.OP_READ or if (write) SelectionKey.OP_WRITE else 0)
     }
 
-    private fun nextTimeout(): Int {
+    private fun nextTimeout(): Long {
+        if (bots.isEmpty() && timers.isEmpty()) return 0L
         val now = System.currentTimeMillis()
-        val due = timers.peek()?.due ?: return 250
-        return (due - now).coerceIn(1L, 250L).toInt()
+        val due = timers.peek()?.due ?: return 250L
+        return (due - now).coerceIn(1L, 250L)
     }
 
     private fun runTimers() {
@@ -403,6 +406,7 @@ class AfkEngine(
         bots.clear()
         listeners.clear()
         timers.clear()
+        Compression.shrink()
     }
 
     // ------------------------------------------------------------------ internal API
@@ -435,6 +439,7 @@ class AfkEngine(
         // the socket pool once the profile is known.
         try {
             authExecutor.execute {
+                if (!running || bot.isStopped()) return@execute
                 try {
                     val session = bot.authSession()
                     val cached = session.accessToken.isNotBlank()
@@ -446,7 +451,7 @@ class AfkEngine(
                     post(Command.AuthFailed(bot, e.message ?: "sign-in failed"))
                     return@execute
                 }
-                if (running && bots[bot.id] === bot) openSocket(bot)
+                if (running && !bot.isStopped()) openSocket(bot)
             }
         } catch (e: RejectedExecutionException) {
             post(Command.ConnectFailed(bot, "Engine is busy"))
@@ -462,7 +467,7 @@ class AfkEngine(
     }
 
     private fun connectNow(bot: BotSession) {
-        if (!running || bots[bot.id] !== bot) return
+        if (!running || bot.isStopped()) return
         try {
             val target = HostPolicy.resolve(bot.config.host, bot.config.port)
             var pingVersion = ""

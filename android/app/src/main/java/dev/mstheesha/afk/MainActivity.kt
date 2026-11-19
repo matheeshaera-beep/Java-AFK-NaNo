@@ -187,22 +187,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import dev.mstheesha.afk.engine.BotConfig
 import dev.mstheesha.afk.engine.VersionCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-    override fun onStart() {
-        super.onStart()
-        AppGraph.uiVisible = true
-    }
-
     override fun onStop() {
-        AppGraph.uiVisible = false
         // Closing the UI with zero bots must not leave a service/notification
         // behind. Bots that are running (or reconnecting) keep it alive.
         if (!AppGraph.hasActiveSessions()) {
@@ -1468,6 +1462,12 @@ private fun ServerRow(
                         onClick = {
                             if (isActive) {
                                 session.stop()
+                            } else if (AppGraph.activeServerNames().size >= EngineHost.MAX_BOTS) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Maximum ${EngineHost.MAX_BOTS} servers can run at the same time.",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
                             } else {
                                 session.start(buildConfig(server))
                                 context.startForegroundService(
@@ -1900,7 +1900,8 @@ private fun ServerSettingsDialog(
     var autoJumpValue by remember(server.id) { mutableStateOf(server.autoJump) }
     var loopCommandValue by remember(server.id) { mutableStateOf(server.loopCommand) }
     var disconnectLowHealth by remember(server.id) { mutableStateOf(server.disconnectOnLowHealth) }
-    var lowHealthThreshold by remember(server.id) { mutableIntStateOf(server.lowHealthThreshold) }
+    var lowHealthText by remember(server.id) { mutableStateOf(server.lowHealthThreshold.toString()) }
+    val lowHealthValue = lowHealthText.toIntOrNull()?.coerceIn(1, 19) ?: server.lowHealthThreshold
     var disconnectDeath by remember(server.id) { mutableStateOf(server.disconnectOnDeath) }
     var disconnectKick by remember(server.id) { mutableStateOf(server.disconnectOnKick) }
     var notifyMention by remember(server.id) { mutableStateOf(server.notifyOnMention) }
@@ -1925,11 +1926,37 @@ private fun ServerSettingsDialog(
         autoJump = autoJumpValue,
         loopCommand = loopCommandValue,
         disconnectOnLowHealth = disconnectLowHealth,
-        lowHealthThreshold = lowHealthThreshold.toFloat(),
+        lowHealthThreshold = lowHealthValue.toFloat(),
         disconnectOnDeath = disconnectDeath,
         disconnectOnKick = disconnectKick,
         notifyOnMention = notifyMention,
     )
+    fun saveAndDismiss() {
+        val parsedDelay = delayText.toIntOrNull()?.coerceIn(1, 3600) ?: server.commandDelaySeconds
+        val parsedView = viewDistanceText.toIntOrNull()?.coerceIn(2, 12) ?: server.viewDistance
+        val parsedHp = lowHealthText.toIntOrNull()?.coerceIn(1, 19) ?: server.lowHealthThreshold
+        val nextProtocol = if (protocolPicked) protocolValue else server.protocolOverride
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            updateServerField(dao, server.id) {
+                it.copy(
+                    chatCommand = chatCommandText,
+                    commandDelaySeconds = parsedDelay,
+                    viewDistance = parsedView,
+                    chatMode = chatModeValue,
+                    autoJump = autoJumpValue,
+                    loopCommand = loopCommandValue,
+                    protocolOverride = nextProtocol,
+                    disconnectOnLowHealth = disconnectLowHealth,
+                    lowHealthThreshold = parsedHp,
+                    disconnectOnDeath = disconnectDeath,
+                    disconnectOnKick = disconnectKick,
+                    notifyOnMention = notifyMention,
+                )
+            }
+        }
+        pushLive()
+        onDismiss()
+    }
     LaunchedEffect(chatCommandText) {
         if (chatCommandText != server.chatCommand) {
             delay(600)
@@ -1987,10 +2014,11 @@ private fun ServerSettingsDialog(
             pushLive()
         }
     }
-    LaunchedEffect(lowHealthThreshold) {
-        if (lowHealthThreshold != server.lowHealthThreshold) {
+    LaunchedEffect(lowHealthText) {
+        val parsed = lowHealthText.toIntOrNull()?.coerceIn(1, 19)
+        if (parsed != null && parsed != server.lowHealthThreshold) {
             delay(400)
-            updateServerField(dao, server.id) { it.copy(lowHealthThreshold = lowHealthThreshold) }
+            updateServerField(dao, server.id) { it.copy(lowHealthThreshold = parsed) }
             pushLive()
         }
     }
@@ -2017,7 +2045,7 @@ private fun ServerSettingsDialog(
     }
     val dialogBg = MaterialTheme.colorScheme.surfaceContainerHigh
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = ::saveAndDismiss,
         shape = RoundedCornerShape(22.dp),
         containerColor = dialogBg,
         modifier = Modifier.border(1.5.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(22.dp)),
@@ -2286,11 +2314,15 @@ private fun ServerSettingsDialog(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("Threshold: ${lowHealthThreshold / 2} hearts (${lowHealthThreshold} HP)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFFF5252))
+                                Text("Threshold: ${lowHealthValue / 2} hearts (${lowHealthValue} HP)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFFF5252))
                             }
                             OutlinedTextField(
-                                value = lowHealthThreshold.toString(),
-                                onValueChange = { lowHealthThreshold = it.toIntOrNull()?.coerceIn(1, 19) ?: lowHealthThreshold },
+                                value = lowHealthText,
+                                onValueChange = { input ->
+                                    if (input.isEmpty() || (input.length <= 2 && input.all(Char::isDigit))) {
+                                        lowHealthText = input
+                                    }
+                                },
                                 label = { Text("HP (1-19)") },
                                 singleLine = true,
                                 modifier = Modifier.width(110.dp),
@@ -2360,6 +2392,11 @@ private fun ServerSettingsDialog(
                 }
 
                 SettingsSection("Account & Tokens", icon = Icons.Default.Settings, iconTint = MaterialTheme.colorScheme.onSurfaceVariant) {
+                    Text(
+                        "Clears the shared Microsoft sign-in token used by all online-mode servers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedButton(
                         onClick = {
                             session.clearToken()
@@ -2416,7 +2453,7 @@ private fun ServerSettingsDialog(
     },
         confirmButton = {
             Button(
-                onClick = onDismiss,
+                onClick = ::saveAndDismiss,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF7FD18B),
@@ -2573,16 +2610,6 @@ private fun SessionScreen(
         if (imeVisible && showChat && itemCount > 0) {
             followNewest = true
             listState.scrollToItem(itemCount - 1)
-        }
-    }
-
-    // Chat is pulled in the session poll loop even with the tab closed; this
-    // just tops it up the moment the tab opens.
-    LaunchedEffect(showChat) {
-        session.setChatPolling(showChat)
-        if (showChat) {
-            // Ensure server chat already ingested is shown, even if status poll is idle.
-            session.refreshChatNow()
         }
     }
 
@@ -3047,24 +3074,24 @@ private fun stateLabel(state: String): String = when (state) {
     else -> "Disconnected"
 }
 
-private fun buildConfig(server: ServerEntity): String =
-    JSONObject()
-        .put("host", server.host)
-        .put("port", server.port)
-        .put("chatCommand", server.chatCommand.trim())
-        .put("commandDelaySeconds", if (server.commandDelaySeconds > 0) server.commandDelaySeconds else 5)
-        .put("auth", if (server.onlineMode) "microsoft" else "offline")
-        .put("username", server.username.ifBlank { "AFKBot" })
-        .put("viewDistance", server.viewDistance.coerceIn(2, 12))
-        .put("chatMode", if (server.chatMode in CALLABLE_CHAT_MODES) server.chatMode else "enabled")
-        .put("autoJump", server.autoJump)
-        .put("loopCommand", server.loopCommand)
-        .put("protocolOverride", server.protocolOverride.coerceIn(0, 1_000_000))
-        .put("disconnectOnLowHealth", server.disconnectOnLowHealth)
-        .put("lowHealthThreshold", server.lowHealthThreshold)
-        .put("disconnectOnDeath", server.disconnectOnDeath)
-        .put("disconnectOnKick", server.disconnectOnKick)
-        .put("notifyOnMention", server.notifyOnMention)
-        .toString()
+private fun buildConfig(server: ServerEntity): BotConfig = BotConfig(
+    id = server.id,
+    host = server.host,
+    port = server.port,
+    username = server.username.ifBlank { "AFKBot" },
+    onlineMode = server.onlineMode,
+    viewDistance = server.viewDistance.coerceIn(2, 12),
+    chatMode = ServerSession.chatModeOf(if (server.chatMode in CALLABLE_CHAT_MODES) server.chatMode else "enabled"),
+    commands = server.chatCommand.split('\n').map { it.trim() }.filter { it.isNotEmpty() },
+    commandDelaySeconds = (if (server.commandDelaySeconds > 0) server.commandDelaySeconds else 5).coerceIn(1, 3600),
+    loopCommand = server.loopCommand,
+    autoJump = server.autoJump,
+    protocolOverride = server.protocolOverride.coerceIn(0, 1_000_000),
+    disconnectOnLowHealth = server.disconnectOnLowHealth,
+    lowHealthThreshold = server.lowHealthThreshold.toFloat(),
+    disconnectOnDeath = server.disconnectOnDeath,
+    disconnectOnKick = server.disconnectOnKick,
+    notifyOnMention = server.notifyOnMention,
+)
 
 private val CALLABLE_CHAT_MODES = setOf("enabled", "commandsOnly", "messagesOnly", "hidden")

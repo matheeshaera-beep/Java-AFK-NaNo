@@ -1,10 +1,6 @@
 name: Upload Release Asset
 
 on:
-  push:
-    branches:
-      - New-UI-update
-      - main
   workflow_dispatch:
 
 permissions:

@@ -39,7 +39,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.mstheesha.afk.java"
-        minSdk = 35
+        minSdk = 26
         targetSdk = 36
         versionCode = 16
         versionName = "3.5"

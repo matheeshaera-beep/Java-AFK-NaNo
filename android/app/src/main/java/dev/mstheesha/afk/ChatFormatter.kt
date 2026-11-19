@@ -38,7 +38,7 @@ object ChatFormatter {
     )
 
     fun format(text: String, defaultColor: Color): AnnotatedString {
-        if (!text.contains('§') && !text.contains('&')) {
+        if (!text.contains('§')) {
             return AnnotatedString(text, SpanStyle(color = defaultColor))
         }
 
@@ -54,10 +54,10 @@ object ChatFormatter {
 
             while (i < len) {
                 val c = text[i]
-                // Support both § and & formatting codes commonly used in server chat
-                val isCode = (c == '§' || c == '&') && i + 1 < len
+                val isCode = c == '§' && i + 1 < len
                 if (isCode) {
-                    val code = text[i + 1].lowercaseChar()
+                    val rawCode = text[i + 1]
+                    val code = rawCode.lowercaseChar()
                     when {
                         code in MC_COLORS -> {
                             currentColor = MC_COLORS[code] ?: defaultColor
@@ -82,10 +82,10 @@ object ChatFormatter {
                             // Obfuscated: keep formatting, nothing special needed
                         }
                         else -> {
-                            // Unrecognized code, treat as literal characters
+                            // Unrecognized code, treat as literal characters preserving original case
                             val spanStyle = currentSpanStyle(currentColor, isBold, isItalic, isUnderline, isStrikethrough)
                             pushStyle(spanStyle)
-                            append("$c$code")
+                            append("$c$rawCode")
                             pop()
                             i += 2
                             continue
@@ -95,7 +95,7 @@ object ChatFormatter {
                 } else {
                     // Accumulate plain text until next formatting code
                     val start = i
-                    while (i < len && !( (text[i] == '§' || text[i] == '&') && i + 1 < len && isFormatChar(text[i + 1]) )) {
+                    while (i < len && !(text[i] == '§' && i + 1 < len && isFormatChar(text[i + 1]))) {
                         i++
                     }
                     val chunk = text.substring(start, i)

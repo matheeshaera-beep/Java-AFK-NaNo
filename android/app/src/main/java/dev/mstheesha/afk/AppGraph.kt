@@ -19,11 +19,6 @@ object AppGraph {
     private val _activeCount = MutableStateFlow(0)
     val activeCount: Flow<Int> get() = _activeCount
 
-    /** True while the UI is in the foreground. The session poll loop uses a
-     *  fast interval then, and a slow one when the screen is off. */
-    @Volatile
-    var uiVisible = false
-
     // Display names for sessions, keyed by server id. The notification reads
     // these to show which server(s) are actually running.
     private val serverNames = mutableMapOf<Long, String>()
@@ -63,7 +58,7 @@ object AppGraph {
         EngineHost.init(context)
     }
 
-    /** Returns the shared ServerSession for a server (never starts a Node per server). */
+    /** Returns the shared ServerSession for a server. */
     fun sessionFor(serverId: Long): ServerSession = synchronized(sessions) {
         sessions.getOrPut(serverId) {
             val session = ServerSession(context(), serverId)
@@ -81,7 +76,7 @@ object AppGraph {
         recomputeActiveCount()
     }
 
-    /** Disconnects every session (each posts stop to the bridge and goes
+    /** Disconnects every session (stops each bot in the engine and resets to
      *  disconnected). Used by the notification's force-stop action so no
      *  session is left showing a stale Connected state. */
     fun stopAllSessions() {

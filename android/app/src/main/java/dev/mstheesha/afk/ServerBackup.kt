@@ -9,6 +9,20 @@ import org.json.JSONObject
  */
 object ServerBackup {
 
+    private val SENSITIVE_CMD_PREFIXES = listOf(
+        "/login ", "/l ", "/register ", "/reg ", "/changepassword ", "/cp ",
+    )
+
+    /** Removes lines containing auth commands that carry plaintext server passwords. */
+    internal fun sanitizeCommands(chatCommand: String): String = chatCommand
+        .split('\n')
+        .filter { line ->
+            val trimmed = line.trim().lowercase()
+            SENSITIVE_CMD_PREFIXES.none { trimmed.startsWith(it) } &&
+                trimmed != "/login" && trimmed != "/register"
+        }
+        .joinToString("\n")
+
     /** Exports list of servers to pretty JSON string. Omits any credentials or database IDs. */
     fun exportToJson(servers: List<ServerEntity>): String {
         val array = JSONArray()
@@ -19,7 +33,7 @@ object ServerBackup {
             obj.put("port", server.port)
             obj.put("username", server.username)
             obj.put("onlineMode", server.onlineMode)
-            obj.put("chatCommand", server.chatCommand)
+            obj.put("chatCommand", sanitizeCommands(server.chatCommand))
             obj.put("commandDelaySeconds", server.commandDelaySeconds)
             obj.put("viewDistance", server.viewDistance)
             obj.put("chatMode", server.chatMode)

@@ -11,6 +11,12 @@ class ChatTextTest {
     }
 
     @Test
+    fun flattensStyledJsonComponents() {
+        val json = """{"text":"Hello ","extra":[{"text":"world","color":"red","bold":true}]}"""
+        assertEquals("Hello §c§lworld§r", ChatText.fromJson(json, styled = true))
+    }
+
+    @Test
     fun translatesChatType() {
         val json = """{"translate":"chat.type.text","with":["Steve","hi"]}"""
         assertEquals("<Steve> hi", ChatText.fromJson(json))

@@ -15,7 +15,7 @@ import javax.crypto.Cipher
  */
 internal class BotSession(
     val id: Long,
-    var config: BotConfig,
+    @Volatile var config: BotConfig,
     private val engine: AfkEngine,
     private val listener: BotListener,
 ) {
@@ -69,12 +69,16 @@ internal class BotSession(
     private var chatSeq = 0
     private var backoffMs = 2_000L
     private var lastInboundMs = 0L
+    @Volatile
     private var stopped = false
     private var timersScheduled = false
+    private var jumpScheduled = false
     private var bytesInTotal = 0L
     private var bytesOutTotal = 0L
     private val logRing = LogRing(100)
     private val random = SecureRandom()
+
+    internal fun isStopped(): Boolean = stopped
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -86,6 +90,7 @@ internal class BotSession(
         commandIndex = 0
         hasPosition = false
         timersScheduled = false
+        jumpScheduled = false
         phase = Phase.CONNECTING
         detail = "Resolving"
         publish()
@@ -103,11 +108,23 @@ internal class BotSession(
         publish()
     }
 
+    private fun stopWithReason(reason: String) {
+        if (stopped) return
+        stopped = true
+        epoch++
+        closeConnection()
+        phase = Phase.STOPPED
+        detail = reason.take(200)
+        connected = false
+        publish()
+        engine.notifyStopped(this)
+    }
+
     fun update(newConfig: BotConfig) {
         val old = config
         config = newConfig
         if (old.chatMode != newConfig.chatMode) buildAllowlist()
-        if (!old.autoJump && newConfig.autoJump) scheduleJump()
+        if (!old.autoJump && newConfig.autoJump && phase == Phase.PLAYING) scheduleJump()
         if (old.commands != newConfig.commands || old.loopCommand != newConfig.loopCommand) {
             commandIndex = 0
             if (newConfig.commands.isNotEmpty() && phase == Phase.PLAYING) scheduleCommand(1_000)
@@ -186,14 +203,7 @@ internal class BotSession(
         if (stopped) return
         log("Connect failed: $message")
         if (message.startsWith("Unsupported server version")) {
-            stopped = true
-            epoch++
-            closeConnection()
-            phase = Phase.STOPPED
-            detail = message.take(200)
-            connected = false
-            publish()
-            engine.notifyStopped(this)
+            stopWithReason(message)
             return
         }
         scheduleReconnect(message)
@@ -223,14 +233,7 @@ internal class BotSession(
         val permanent = listOf("expired", "declined", "no xbox", "family group", "rate limited")
             .any { message.lowercase().contains(it) }
         if (permanent) {
-            stopped = true
-            epoch++
-            closeConnection()
-            phase = Phase.STOPPED
-            detail = message.take(160)
-            connected = false
-            publish()
-            engine.notifyStopped(this)
+            stopWithReason(message.take(160))
         } else {
             scheduleReconnect(message)
         }
@@ -628,13 +631,13 @@ internal class BotSession(
                 publish()
                 if (config.disconnectOnLowHealth && phase == Phase.PLAYING && health > 0f && health <= config.lowHealthThreshold) {
                     log("Emergency disconnect: health dropped to ${health.toInt()} (threshold ${config.lowHealthThreshold.toInt()})")
-                    stop()
+                    stopWithReason("Emergency disconnect: low health (${health.toInt()} HP)")
                 }
             }
             id(P.PLAY_S2C_DEATH_COMBAT) -> {
                 if (config.disconnectOnDeath && phase == Phase.PLAYING) {
                     log("Disconnected on death as requested in server settings")
-                    stop()
+                    stopWithReason("Disconnected on death")
                 } else {
                     val e = epoch
                     engine.schedule(this, 1_000) {
@@ -681,18 +684,18 @@ internal class BotSession(
             x = r.readDouble()
             y = r.readDouble()
             z = r.readDouble()
-            val dx = r.readDouble()
-            val dy = r.readDouble()
-            val dz = r.readDouble()
+            r.readDouble() // vx (velocity)
+            r.readDouble() // vy
+            r.readDouble() // vz
             yaw = r.readFloat()
             pitch = r.readFloat()
             flags = r.readInt()
             if (hasPosition) {
-                if (flags and 0x01 != 0) x = lastX + dx
-                if (flags and 0x02 != 0) y = lastY + dy
-                if (flags and 0x04 != 0) z = lastZ + dz
-                if (flags and 0x08 != 0) yaw = lastYaw + yaw
-                if (flags and 0x10 != 0) pitch = lastPitch + pitch
+                if (flags and 0x01 != 0) x += lastX
+                if (flags and 0x02 != 0) y += lastY
+                if (flags and 0x04 != 0) z += lastZ
+                if (flags and 0x08 != 0) yaw += lastYaw
+                if (flags and 0x10 != 0) pitch += lastPitch
             }
         } else {
             x = r.readDouble()
@@ -729,7 +732,7 @@ internal class BotSession(
     private fun handlePlayerChat(r: PacketReader) {
         if (protocol < 759) {
             // Pre-1.19 chat packet: JSON + position (0 chat, 1 system, 2 action bar).
-            val text = ChatText.fromJson(r.readString(1 shl 20))
+            val text = ChatText.fromJson(r.readString(1 shl 20), styled = true)
             val position = r.readByte().toInt()
             when (config.chatMode) {
                 ChatMode.COMMANDS_ONLY -> if (position != 1) return
@@ -737,12 +740,19 @@ internal class BotSession(
                 ChatMode.HIDDEN -> return
                 ChatMode.ALL -> Unit
             }
-            if (text.isNotBlank()) emitChat(if (position == 0) "chat" else "system", null, text)
+            if (text.isNotBlank()) {
+                val type = when {
+                    isWhisperText(text) -> "whisper"
+                    position == 0 -> "chat"
+                    else -> "system"
+                }
+                emitChat(type, null, text)
+            }
             return
         }
         val text = parsePlayerChat(r)
         if (text.isBlank() || config.chatMode == ChatMode.COMMANDS_ONLY) return
-        emitChat("chat", null, text)
+        emitChat(if (isWhisperText(text)) "whisper" else "chat", null, text)
     }
 
     private fun parsePlayerChat(r: PacketReader): String = when {
@@ -778,13 +788,15 @@ internal class BotSession(
             protocol == 759 -> {
                 val json = r.readString(1 shl 20)
                 r.readVarInt() // chat type
-                ChatText.fromJson(json)
+                ChatText.fromJson(json, styled = true)
             }
-            Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbt(r, false)
-            else -> ChatText.fromJson(r.readString(1 shl 20))
+            Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbt(r, false, styled = true)
+            else -> ChatText.fromJson(r.readString(1 shl 20), styled = true)
         }
         if (config.chatMode == ChatMode.MESSAGES_ONLY || config.chatMode == ChatMode.HIDDEN) return
-        emitChat("system", null, text)
+        if (text.isNotBlank()) {
+            emitChat(if (isWhisperText(text)) "whisper" else "system", null, text)
+        }
     }
 
     private fun handleDisguisedChat(r: PacketReader) {
@@ -792,15 +804,22 @@ internal class BotSession(
         val text: String
         val sender: String?
         if (Protocol.textComponentsAreNbt(protocol)) {
-            text = ChatText.fromNbt(r, false)
+            text = ChatText.fromNbt(r, false, styled = true)
             r.readVarInt()
             sender = ChatText.fromNbt(r, false)
         } else {
-            text = ChatText.fromJson(r.readString(1 shl 20))
+            text = ChatText.fromJson(r.readString(1 shl 20), styled = true)
             r.readVarInt()
             sender = ChatText.fromJson(r.readString(1 shl 20))
         }
-        if (text.isNotBlank()) emitChat("chat", sender.ifBlank { null }, text)
+        if (text.isNotBlank()) {
+            emitChat(if (isWhisperText(text)) "whisper" else "chat", sender.ifBlank { null }, text)
+        }
+    }
+
+    private fun isWhisperText(text: String): Boolean {
+        val plain = text.replace(SECTION_CODE_REGEX, "").lowercase()
+        return plain.contains(" whispers to you:") || plain.contains(" -> me]")
     }
 
     private fun emitChat(type: String, sender: String?, text: String) {
@@ -868,24 +887,12 @@ internal class BotSession(
         connected = false
         val lower = text.lowercase()
         if (BAN_MARKERS.any { lower.contains(it) }) {
-            stopped = true
-            epoch++
-            closeConnection()
-            phase = Phase.STOPPED
-            detail = text.take(200)
-            publish()
-            engine.notifyStopped(this)
+            stopWithReason(text)
             return
         }
         if (config.disconnectOnKick) {
             log("Disconnected on kick as requested in server settings")
-            stopped = true
-            epoch++
-            closeConnection()
-            phase = Phase.STOPPED
-            detail = text.take(200)
-            publish()
-            engine.notifyStopped(this)
+            stopWithReason(text)
             return
         }
         val isRestart = RESTART_MARKERS.any { lower.contains(it) }
@@ -963,9 +970,12 @@ internal class BotSession(
     }
 
     private fun scheduleJump() {
-        if (stopped) return
+        if (stopped || jumpScheduled) return
+        jumpScheduled = true
         val e = epoch
-        engine.schedule(this, 15_000) {
+        val delayMs = 25_000L + random.nextInt(15_001) // 25–40s randomized anti-AFK cadence
+        engine.schedule(this, delayMs) {
+            jumpScheduled = false
             if (epoch != e || stopped) return@schedule
             if (!config.autoJump || phase != Phase.PLAYING) {
                 scheduleJump()
@@ -1113,6 +1123,7 @@ internal class BotSession(
     fun recentLog(): List<String> = logRing.toList()
 
     private companion object {
+        val SECTION_CODE_REGEX = Regex("§.")
         val BAN_MARKERS = listOf(
             "banned", "ban ", "blacklist", "not whitelisted", "not allowed on this server",
         )
