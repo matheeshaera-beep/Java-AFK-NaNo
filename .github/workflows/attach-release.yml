@@ -2,6 +2,15 @@ name: Upload Release Asset
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v3.6)"
+        required: false
+        default: "v3.6"
+      apk:
+        description: "Path to APK in repo"
+        required: false
+        default: "dist/JavaAFK-3.6.apk"
 
 permissions:
   contents: write
@@ -13,8 +22,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Attach APK to GitHub Release v3.5
+      - name: Attach APK to GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || 'v3.6' }}
+          APK_PATH: ${{ inputs.apk || 'dist/JavaAFK-3.6.apk' }}
         run: |
-          gh release upload v3.5 dist/JavaAFK-3.5.apk --clobber
+          gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber
