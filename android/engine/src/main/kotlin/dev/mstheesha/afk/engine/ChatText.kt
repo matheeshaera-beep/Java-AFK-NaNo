@@ -50,16 +50,21 @@ internal object ChatText {
         ""
     }
 
-    fun flatten(value: Any?, styled: Boolean = false): String = when (value) {
-        null -> ""
-        is String -> value
-        is Number, is Boolean -> value.toString()
-        is List<*> -> value.joinToString("") { flatten(it, styled) }
-        is Map<*, *> -> flattenComponent(value, styled)
-        else -> ""
+    private const val MAX_DEPTH = 64
+
+    fun flatten(value: Any?, styled: Boolean = false, depth: Int = 0): String {
+        if (depth > MAX_DEPTH) return ""
+        return when (value) {
+            null -> ""
+            is String -> value
+            is Number, is Boolean -> value.toString()
+            is List<*> -> value.joinToString("") { flatten(it, styled, depth + 1) }
+            is Map<*, *> -> flattenComponent(value, styled, depth + 1)
+            else -> ""
+        }
     }
 
-    private fun flattenComponent(map: Map<*, *>, styled: Boolean): String {
+    private fun flattenComponent(map: Map<*, *>, styled: Boolean, depth: Int): String {
         val sb = StringBuilder()
         var appliedStyle = false
         if (styled) {
@@ -87,16 +92,16 @@ internal object ChatText {
             }
         }
         val text = map["text"]
-        if (text != null) sb.append(flatten(text, styled))
+        if (text != null) sb.append(flatten(text, styled, depth))
         val translate = map["translate"] as? String
         if (translate != null) {
-            val args = (map["with"] as? List<*>)?.map { flatten(it, styled) } ?: emptyList()
+            val args = (map["with"] as? List<*>)?.map { flatten(it, styled, depth) } ?: emptyList()
             sb.append(translate(translate, args))
         }
         val extra = map["extra"] as? List<*>
-        if (extra != null) for (part in extra) sb.append(flatten(part, styled))
+        if (extra != null) for (part in extra) sb.append(flatten(part, styled, depth))
         // Fall back to a bare "contents" component (1.21.5+ item/entity names).
-        if (sb.isEmpty() && map["contents"] != null) sb.append(flatten(map["contents"], styled))
+        if (sb.isEmpty() && map["contents"] != null) sb.append(flatten(map["contents"], styled, depth))
         if (appliedStyle && sb.length > 2) sb.append("§r")
         return sb.toString()
     }

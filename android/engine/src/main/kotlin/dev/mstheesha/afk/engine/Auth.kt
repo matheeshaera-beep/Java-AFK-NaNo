@@ -37,6 +37,28 @@ internal class MicrosoftAuth(
                 -> true
                 else -> httpCode == 400 || httpCode == 401
             }
+
+        private const val DEFAULT_VERIFICATION_URL = "https://www.microsoft.com/link"
+
+        /** Ensures the sign-in URL uses HTTPS on an official Microsoft domain. */
+        internal fun sanitizeVerificationUrl(raw: String?): String {
+            if (raw.isNullOrBlank()) return DEFAULT_VERIFICATION_URL
+            return try {
+                val uri = java.net.URI(raw.trim())
+                val host = uri.host?.lowercase() ?: return DEFAULT_VERIFICATION_URL
+                val allowed = host == "microsoft.com" ||
+                    host.endsWith(".microsoft.com") ||
+                    host == "live.com" ||
+                    host.endsWith(".live.com")
+                if (uri.scheme.equals("https", ignoreCase = true) && allowed) {
+                    raw.trim()
+                } else {
+                    DEFAULT_VERIFICATION_URL
+                }
+            } catch (_: Exception) {
+                DEFAULT_VERIFICATION_URL
+            }
+        }
     }
 
     class AuthException(message: String, val kind: Kind = Kind.UNKNOWN) : Exception(message) {
@@ -168,11 +190,12 @@ internal class MicrosoftAuth(
         val root = Json.parse(response).asObj() ?: throw AuthException("bad device-code response")
         val deviceCode = root.str("device_code") ?: throw AuthException("no device code")
         val userCode = root.str("user_code") ?: ""
-        val url = root.str("verification_uri") ?: "https://www.microsoft.com/link"
+        val url = sanitizeVerificationUrl(root.str("verification_uri"))
         var interval = (root.num("interval") ?: 5L).coerceIn(2, 30)
         val deadline = System.currentTimeMillis() + (root.num("expires_in") ?: 900L) * 1000
         onDeviceCode(url, userCode)
         while (System.currentTimeMillis() < deadline) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException("Sign-in cancelled")
             Thread.sleep(interval * 1000)
             try {
                 return pollToken(deviceCode)

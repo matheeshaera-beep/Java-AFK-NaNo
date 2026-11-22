@@ -19,6 +19,8 @@ internal object Nbt {
     private const val TAG_INT_ARRAY = 11
     private const val TAG_LONG_ARRAY = 12
 
+    private const val MAX_DEPTH = 64
+
     /**
      * Reads one tag. [named] is true for the pre-1.20.2 network form, which
      * carries a root name; the modern form is anonymous.
@@ -30,43 +32,46 @@ internal object Nbt {
             val nameLength = r.readUnsignedShort()
             if (nameLength > 0) r.skip(nameLength)
         }
-        return payload(r, type)
+        return payload(r, type, 0)
     }
 
-    private fun payload(r: PacketReader, type: Int): Any? = when (type) {
-        TAG_BYTE -> r.readByte()
-        TAG_SHORT -> r.readShort()
-        TAG_INT -> r.readInt()
-        TAG_LONG -> r.readLong()
-        TAG_FLOAT -> r.readFloat()
-        TAG_DOUBLE -> r.readDouble()
-        TAG_BYTE_ARRAY -> r.readByteArray(1 shl 20)
-        TAG_STRING -> r.readString(1 shl 20)
-        TAG_LIST -> {
-            val itemType = r.readUnsignedByte()
-            val len = r.readInt().coerceIn(0, 1024)
-            val items = ArrayList<Any?>(len)
-            repeat(len) { items.add(if (itemType == TAG_END) null else payload(r, itemType)) }
-            items
-        }
-        TAG_COMPOUND -> {
-            val map = LinkedHashMap<String, Any?>()
-            while (true) {
-                val childType = r.readUnsignedByte()
-                if (childType == TAG_END) break
-                val name = r.readString(1 shl 16)
-                map[name] = payload(r, childType)
+    private fun payload(r: PacketReader, type: Int, depth: Int): Any? {
+        if (depth > MAX_DEPTH) throw ProtocolException("NBT nesting too deep")
+        return when (type) {
+            TAG_BYTE -> r.readByte()
+            TAG_SHORT -> r.readShort()
+            TAG_INT -> r.readInt()
+            TAG_LONG -> r.readLong()
+            TAG_FLOAT -> r.readFloat()
+            TAG_DOUBLE -> r.readDouble()
+            TAG_BYTE_ARRAY -> r.readByteArray(1 shl 20)
+            TAG_STRING -> r.readString(1 shl 20)
+            TAG_LIST -> {
+                val itemType = r.readUnsignedByte()
+                val len = r.readInt().coerceIn(0, 1024)
+                val items = ArrayList<Any?>(len)
+                repeat(len) { items.add(if (itemType == TAG_END) null else payload(r, itemType, depth + 1)) }
+                items
             }
-            map
+            TAG_COMPOUND -> {
+                val map = LinkedHashMap<String, Any?>()
+                while (true) {
+                    val childType = r.readUnsignedByte()
+                    if (childType == TAG_END) break
+                    val name = r.readString(1 shl 16)
+                    map[name] = payload(r, childType, depth + 1)
+                }
+                map
+            }
+            TAG_INT_ARRAY -> {
+                val len = r.readInt().coerceIn(0, 1024)
+                IntArray(len) { r.readInt() }
+            }
+            TAG_LONG_ARRAY -> {
+                val len = r.readInt().coerceIn(0, 1024)
+                LongArray(len) { r.readLong() }
+            }
+            else -> throw ProtocolException("unknown NBT tag $type")
         }
-        TAG_INT_ARRAY -> {
-            val len = r.readInt().coerceIn(0, 1024)
-            IntArray(len) { r.readInt() }
-        }
-        TAG_LONG_ARRAY -> {
-            val len = r.readInt().coerceIn(0, 1024)
-            LongArray(len) { r.readLong() }
-        }
-        else -> throw ProtocolException("unknown NBT tag $type")
     }
 }

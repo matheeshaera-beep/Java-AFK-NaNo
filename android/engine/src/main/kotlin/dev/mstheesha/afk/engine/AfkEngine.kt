@@ -438,8 +438,9 @@ class AfkEngine(
         // on the auth pool so other servers keep connecting, then hand off to
         // the socket pool once the profile is known.
         try {
-            authExecutor.execute {
-                if (!running || bot.isStopped()) return@execute
+            bot.authFuture?.cancel(true)
+            bot.authFuture = authExecutor.submit {
+                if (!running || bot.isStopped()) return@submit
                 try {
                     val session = bot.authSession()
                     val cached = session.accessToken.isNotBlank()
@@ -447,9 +448,14 @@ class AfkEngine(
                     session.ensureAccessToken()
                     bot.resolveProfile(session.profileName, session.profileUuid)
                     if (!cached) post(Command.LogLine(bot, "Signed in as ${session.profileName}"))
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@submit
                 } catch (e: Exception) {
                     post(Command.AuthFailed(bot, e.message ?: "sign-in failed"))
-                    return@execute
+                    return@submit
+                } finally {
+                    bot.authFuture = null
                 }
                 if (running && !bot.isStopped()) openSocket(bot)
             }
@@ -475,7 +481,13 @@ class AfkEngine(
                 bot.config.protocolOverride
             } else {
                 val ping = try {
-                    ServerListPing.ping(target.host, target.port, options.connectTimeoutMs)
+                    ServerListPing.ping(
+                        host = target.host,
+                        port = target.port,
+                        timeoutMs = options.connectTimeoutMs,
+                        handshakeHost = bot.config.host,
+                        handshakePort = bot.config.port,
+                    )
                 } catch (e: Exception) {
                     null
                 }

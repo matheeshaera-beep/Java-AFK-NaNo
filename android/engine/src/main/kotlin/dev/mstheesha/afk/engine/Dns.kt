@@ -5,6 +5,7 @@ internal object Dns {
     data class Srv(val host: String, val port: Int)
 
     private const val ENDPOINT = "https://cloudflare-dns.com/dns-query"
+    private const val SRV_TIMEOUT_MS = 3_000
 
     /**
      * Returns the best `_minecraft._tcp` target, or null when the server has no
@@ -14,7 +15,12 @@ internal object Dns {
         return try {
             val url = "$ENDPOINT?name=" + java.net.URLEncoder.encode("_minecraft._tcp.$host", "UTF-8") +
                 "&type=SRV"
-            val json = Http.get(url, headers = mapOf("Accept" to "application/dns-json"))
+            val json = Http.get(
+                url,
+                headers = mapOf("Accept" to "application/dns-json"),
+                connectTimeoutMs = SRV_TIMEOUT_MS,
+                readTimeoutMs = SRV_TIMEOUT_MS,
+            )
             val root = Json.parse(json).asObj() ?: return null
             val answers = root.arr("Answer") ?: return null
             data class Record(val priority: Int, val weight: Int, val port: Int, val target: String)

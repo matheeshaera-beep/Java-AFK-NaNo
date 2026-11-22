@@ -55,10 +55,9 @@ object ServerPinger {
                 }
             }
             return try {
-                val res = ServerListPing.pingWithSrv(host, port, timeoutMs = 2_500)
+                val res = ServerListPing.pingWithSrv(host, port, timeoutMs = 6_000)
                 val bitmap = res.favicon
-                    ?.takeIf { it.startsWith(FAVICON_PREFIX) }
-                    ?.substring(FAVICON_PREFIX.length)
+                    ?.let { extractBase64(it) }
                     ?.let { decodeFavicon(it) }
                 val status = ServerStatus(
                     latencyMs = res.latencyMs.coerceAtLeast(1L),
@@ -73,6 +72,17 @@ object ServerPinger {
                 null
             }
         }
+    }
+
+    private fun extractBase64(dataUri: String): String? {
+        val comma = dataUri.indexOf(',')
+        val raw = if (comma >= 0) dataUri.substring(comma + 1) else dataUri
+        val cleaned = buildString(raw.length) {
+            for (ch in raw) {
+                if (!ch.isWhitespace()) append(ch)
+            }
+        }
+        return cleaned.ifEmpty { null }
     }
 
     private fun decodeFavicon(base64: String): Bitmap? {

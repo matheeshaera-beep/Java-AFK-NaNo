@@ -72,20 +72,27 @@ internal object Json {
     }
 
     private class Parser(private val s: String) {
+        private companion object {
+            const val MAX_DEPTH = 64
+        }
+
         var pos = 0
         fun done() = pos >= s.length
         fun skipWs() {
             while (pos < s.length && s[pos].isWhitespace()) pos++
         }
 
-        fun value(): Any? = when (val c = peek()) {
-            '{' -> obj()
-            '[' -> array()
-            '"' -> string()
-            't' -> literal("true", true)
-            'f' -> literal("false", false)
-            'n' -> literal("null", null)
-            else -> if (c == '-' || c.isDigit()) number() else error("unexpected '$c'")
+        fun value(depth: Int = 0): Any? {
+            if (depth > MAX_DEPTH) error("nesting too deep")
+            return when (val c = peek()) {
+                '{' -> obj(depth + 1)
+                '[' -> array(depth + 1)
+                '"' -> string()
+                't' -> literal("true", true)
+                'f' -> literal("false", false)
+                'n' -> literal("null", null)
+                else -> if (c == '-' || c.isDigit()) number() else error("unexpected '$c'")
+            }
         }
 
         private fun peek(): Char = if (pos < s.length) s[pos] else error("unexpected end")
@@ -98,7 +105,7 @@ internal object Json {
             return value
         }
 
-        private fun obj(): Map<String, Any?> {
+        private fun obj(depth: Int): Map<String, Any?> {
             pos++ // {
             val map = LinkedHashMap<String, Any?>()
             skipWs()
@@ -111,7 +118,7 @@ internal object Json {
                 if (peek() != ':') error("expected ':'")
                 pos++
                 skipWs()
-                map[key] = value()
+                map[key] = value(depth)
                 skipWs()
                 when (peek()) {
                     ',' -> pos++
@@ -121,14 +128,14 @@ internal object Json {
             }
         }
 
-        private fun array(): List<Any?> {
+        private fun array(depth: Int): List<Any?> {
             pos++ // [
             val list = ArrayList<Any?>()
             skipWs()
             if (peek() == ']') { pos++; return list }
             while (true) {
                 skipWs()
-                list.add(value())
+                list.add(value(depth))
                 skipWs()
                 when (peek()) {
                     ',' -> pos++

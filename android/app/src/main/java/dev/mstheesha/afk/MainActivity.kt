@@ -1307,6 +1307,7 @@ private fun ServerAvatarStatus(
                 name = name,
                 size = size,
                 desaturate = isOffline,
+                retryKey = isOnline,
             )
         }
 
@@ -1558,16 +1559,17 @@ private fun ServerAvatar(
     name: String,
     size: Dp,
     desaturate: Boolean = false,
+    retryKey: Any = Unit,
 ) {
     val cacheKey = "$host:$port"
     var favicon by remember(cacheKey) {
         mutableStateOf(faviconCache[cacheKey])
     }
 
-    LaunchedEffect(cacheKey) {
+    LaunchedEffect(cacheKey, retryKey) {
         if (faviconCache.containsKey(cacheKey)) {
             favicon = faviconCache[cacheKey]
-        } else {
+        } else if (favicon == null) {
             val bmp = withContext(Dispatchers.IO) {
                 ServerPinger.fetchFavicon(host, port)
             }
@@ -3047,7 +3049,10 @@ private fun SessionScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    val uri = Uri.parse(url)
+                    if (uri.scheme.equals("https", ignoreCase = true)) {
+                        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                    }
                 }) { Text("Open browser") }
             },
             dismissButton = {

@@ -41,8 +41,8 @@ android {
         applicationId = "dev.mstheesha.afk.java"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "3.6"
+        versionCode = 18
+        versionName = "3.7"
     }
 
     buildTypes {

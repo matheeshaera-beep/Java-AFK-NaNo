@@ -9,7 +9,7 @@ internal object Http {
     private const val MAX_BYTES = 1 shl 20
     private const val CONNECT_TIMEOUT = 15_000
     private const val READ_TIMEOUT = 30_000
-    private const val USER_AGENT = "JavaAFK/3.0 (engine)"
+    private const val USER_AGENT = "JavaAFK/3.7 (engine)"
 
     class HttpException(val code: Int, val body: String) : Exception("HTTP $code")
 
@@ -26,8 +26,14 @@ internal object Http {
     fun postJson(url: String, json: String, bearer: String?): String =
         request(url, "POST", json.toByteArray(Charsets.UTF_8), "application/json", bearer, emptyMap())
 
-    fun get(url: String, bearer: String? = null, headers: Map<String, String> = emptyMap()): String =
-        request(url, "GET", null, null, bearer, headers)
+    fun get(
+        url: String,
+        bearer: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        connectTimeoutMs: Int = CONNECT_TIMEOUT,
+        readTimeoutMs: Int = READ_TIMEOUT,
+    ): String =
+        request(url, "GET", null, null, bearer, headers, connectTimeoutMs, readTimeoutMs)
 
     private fun request(
         url: String,
@@ -36,13 +42,15 @@ internal object Http {
         contentType: String?,
         bearer: String?,
         headers: Map<String, String>,
+        connectTimeoutMs: Int = CONNECT_TIMEOUT,
+        readTimeoutMs: Int = READ_TIMEOUT,
     ): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
-            conn.connectTimeout = CONNECT_TIMEOUT
-            conn.readTimeout = READ_TIMEOUT
-            conn.instanceFollowRedirects = true
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+            conn.instanceFollowRedirects = bearer == null
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.setRequestProperty("Accept", "application/json")
             if (bearer != null) conn.setRequestProperty("Authorization", "Bearer $bearer")

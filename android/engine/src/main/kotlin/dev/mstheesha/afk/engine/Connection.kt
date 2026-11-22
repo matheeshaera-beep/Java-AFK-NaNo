@@ -20,6 +20,7 @@ internal class Connection(
         const val MAX_FRAME = 256 * 1024
         const val READ_INITIAL = 4096
         const val WRITE_INITIAL = 1024
+        const val MAX_WRITE_QUEUE = 64
     }
 
     var state = ConnState.HANDSHAKE
@@ -190,6 +191,7 @@ internal class Connection(
 
     private fun writeFully() {
         if (writeQueue.isNotEmpty()) {
+            if (writeQueue.size >= MAX_WRITE_QUEUE) throw ProtocolException("write queue full")
             writeQueue.addLast(frame.buf.copyOf(frame.size))
             return
         }
@@ -199,6 +201,7 @@ internal class Connection(
             // queueing bytes that can never be flushed.
             val n = channel.write(ByteBuffer.wrap(frame.buf, off, frame.size - off))
             if (n <= 0) {
+                if (writeQueue.size >= MAX_WRITE_QUEUE) throw ProtocolException("write queue full")
                 writeQueue.addLast(frame.buf.copyOfRange(off, frame.size))
                 return
             }

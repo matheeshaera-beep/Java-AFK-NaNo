@@ -45,6 +45,8 @@ internal class BotSession(
         private set
     @Volatile
     var auth: MicrosoftAuth? = null
+    @Volatile
+    var authFuture: java.util.concurrent.Future<*>? = null
     var authPending = false
 
     /** Authenticated Minecraft profile, resolved before the socket opens in online mode. */
@@ -93,6 +95,7 @@ internal class BotSession(
         jumpScheduled = false
         phase = Phase.CONNECTING
         detail = "Resolving"
+        log("Resolving ${config.host}:${config.port}…")
         publish()
         engine.connect(this)
     }
@@ -101,6 +104,8 @@ internal class BotSession(
         if (stopped) return
         stopped = true
         epoch++
+        authFuture?.cancel(true)
+        authFuture = null
         closeConnection()
         phase = Phase.STOPPED
         detail = "Stopped"
@@ -112,6 +117,8 @@ internal class BotSession(
         if (stopped) return
         stopped = true
         epoch++
+        authFuture?.cancel(true)
+        authFuture = null
         closeConnection()
         phase = Phase.STOPPED
         detail = reason.take(200)

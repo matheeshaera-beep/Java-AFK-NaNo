@@ -16,7 +16,6 @@ internal object HostPolicy {
 
     data class Target(val host: String, val port: Int)
 
-    @Synchronized
     fun resolve(host: String, port: Int): Target {
         val name = host.trim()
         if (port != DEFAULT_PORT || name.isEmpty() || isLiteral(name)) {
@@ -24,15 +23,19 @@ internal object HostPolicy {
         }
         val key = name.lowercase()
         val now = System.currentTimeMillis()
-        cache[key]?.let { if (it.expiresAt > now) return Target(it.host, it.port) }
+        synchronized(cache) {
+            cache[key]?.let { if (it.expiresAt > now) return Target(it.host, it.port) }
+        }
 
         val srv = Dns.resolveSrv(name)
         val entry = if (srv != null) {
-            Entry(srv.host, srv.port, now + POSITIVE_TTL_MS)
+            Entry(srv.host, srv.port, System.currentTimeMillis() + POSITIVE_TTL_MS)
         } else {
-            Entry(name, port, now + NEGATIVE_TTL_MS)
+            Entry(name, port, System.currentTimeMillis() + NEGATIVE_TTL_MS)
         }
-        cache[key] = entry
+        synchronized(cache) {
+            cache[key] = entry
+        }
         return Target(entry.host, entry.port)
     }
 
@@ -48,6 +51,5 @@ internal object HostPolicy {
         return false
     }
 
-    @Synchronized
-    fun clear() = cache.clear()
+    fun clear() = synchronized(cache) { cache.clear() }
 }
