@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,6 +16,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,7 +44,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -49,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,9 +62,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,11 +79,12 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * Clean 4-tab Material 3 bottom sheet for per-server settings:
+ * Swipeable 4-tab Material 3 Expressive bottom sheet for per-server settings:
  * General · Commands · AFK · Safety.
  *
- * Uses progressive disclosure so every tab stays calm and readable even with
- * advanced triggers, safety guardrails, and webhook alerts.
+ * Each page owns its own [rememberScrollState], and pending edits are always
+ * flushed synchronously on dismiss/dispose via [AppGraph.ioScope] so rapid
+ * toggles are never lost.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -87,12 +97,12 @@ fun ServerSettingsSheet(
 ) {
     val dao = AppGraph.db.serverDao()
     val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val reduced = LocalReducedMotion.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val accounts by EngineHost.accountsFlow().collectAsState()
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 4 })
 
-    var selectedTab by remember(server.id) { mutableIntStateOf(0) }
-
-    // Editable local state, auto-saved with debounce & pushed live to running bot.
     var protocolValue by remember(server.id) {
         mutableIntStateOf(
             if (server.protocolOverride == 0 || VersionCatalog.nameOf(server.protocolOverride) != null) {
@@ -113,9 +123,7 @@ fun ServerSettingsSheet(
     var triggers by remember(server.id) { mutableStateOf(ServerSession.parseTriggers(server.chatTriggersJson)) }
 
     var antiAfkMode by remember(server.id) {
-        mutableStateOf(
-            server.antiAfkMode.ifBlank { if (server.autoJump) "jump" else "off" },
-        )
+        mutableStateOf(server.antiAfkMode.ifBlank { if (server.autoJump) "jump" else "off" })
     }
     var autoRespawn by remember(server.id) { mutableStateOf(server.autoRespawn) }
     var autoStopMinutes by remember(server.id) { mutableIntStateOf(server.autoStopMinutes) }
@@ -144,7 +152,22 @@ fun ServerSettingsSheet(
         webhookUrl = webhookUrl.trim(),
     )
 
-    // Single debounced persistence + live push avoids race conditions across tabs.
+    val latestSnapshotBuilder by rememberUpdatedState { base: ServerEntity -> snapshotEntity(base) }
+
+    fun flushNow() {
+        val builder = latestSnapshotBuilder
+        val id = server.id
+        AppGraph.ioScope.launch {
+            val current = dao.get(id) ?: return@launch
+            val updated = builder(current)
+            if (updated != current) {
+                dao.update(updated)
+                session.pushLiveSettings(updated)
+            }
+        }
+    }
+
+    // Debounced live save while the sheet stays open.
     val saveKey = listOf(
         protocolValue, protocolPicked, viewDistance, chatMode, accountKey,
         chatCommand, delayText, loopCommand, triggers,
@@ -161,8 +184,18 @@ fun ServerSettingsSheet(
         }
     }
 
+    // Guarantee zero lost edits if the user taps Done or swipes down within 450 ms.
+    DisposableEffect(server.id) {
+        onDispose { flushNow() }
+    }
+
+    fun dismissAndFlush() {
+        flushNow()
+        onDismiss()
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = ::dismissAndFlush,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
@@ -192,23 +225,30 @@ fun ServerSettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = onDismiss) {
+                TextButton(onClick = ::dismissAndFlush) {
                     Text("Done", fontWeight = FontWeight.SemiBold)
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // 4 clean category tabs
             val tabs = listOf("General", "Commands", "AFK", "Safety")
             PrimaryTabRow(
-                selectedTabIndex = selectedTab,
+                selectedTabIndex = pagerState.currentPage,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
                 tabs.forEachIndexed { idx, title ->
                     Tab(
-                        selected = selectedTab == idx,
-                        onClick = { selectedTab = idx },
+                        selected = pagerState.currentPage == idx,
+                        onClick = {
+                            if (pagerState.currentPage != idx) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                scope.launch {
+                                    if (reduced) pagerState.scrollToPage(idx)
+                                    else pagerState.animateScrollToPage(idx)
+                                }
+                            }
+                        },
                         text = {
                             Text(
                                 title,
@@ -220,66 +260,92 @@ fun ServerSettingsSheet(
                 }
             }
 
-            Column(
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 320.dp, max = 520.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (selectedTab) {
-                    0 -> GeneralSettingsTab(
-                        server = server,
-                        protocolValue = protocolValue,
-                        onPickProtocol = { v ->
-                            protocolPicked = true
-                            protocolValue = v
-                        },
-                        viewDistance = viewDistance,
-                        onViewDistance = { viewDistance = it },
-                        chatMode = chatMode,
-                        onChatMode = { chatMode = it },
-                        accountKey = accountKey,
-                        accounts = accounts,
-                        onAccountKey = { accountKey = it },
-                        onOpenAccounts = onOpenAccounts,
-                        onClearToken = {
-                            val key = accountKey.ifBlank { KeystoreTokenStore.DEFAULT_KEY }
-                            session.clearToken(key)
-                            scope.launch { snackbarHostState.showSnackbar("Saved login token cleared") }
-                        },
-                    )
-                    1 -> CommandsSettingsTab(
-                        chatCommand = chatCommand,
-                        onChatCommand = { chatCommand = it },
-                        delayText = delayText,
-                        onDelayText = { delayText = it },
-                        loopCommand = loopCommand,
-                        onLoopCommand = { loopCommand = it },
-                        triggers = triggers,
-                        onTriggers = { triggers = it },
-                    )
-                    2 -> AfkSettingsTab(
-                        antiAfkMode = antiAfkMode,
-                        onAntiAfkMode = { antiAfkMode = it },
-                        autoRespawn = autoRespawn,
-                        onAutoRespawn = { autoRespawn = it },
-                        autoStopMinutes = autoStopMinutes,
-                        onAutoStopMinutes = { autoStopMinutes = it },
-                    )
-                    3 -> SafetySettingsTab(
-                        lowHealthThreshold = lowHealthThreshold,
-                        onLowHealthThreshold = { lowHealthThreshold = it },
-                        alertsMask = alertsMask,
-                        onAlertsMask = { alertsMask = it },
-                        alertKeyword = alertKeyword,
-                        onAlertKeyword = { alertKeyword = it },
-                        webhookUrl = webhookUrl,
-                        onWebhookUrl = { webhookUrl = it },
-                    )
+                    .heightIn(min = 340.dp, max = 520.dp),
+                verticalAlignment = Alignment.Top,
+            ) { page ->
+                // Each page owns its own independent ScrollState.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    when (page) {
+                        0 -> GeneralSettingsTab(
+                            server = server,
+                            protocolValue = protocolValue,
+                            onPickProtocol = { v ->
+                                protocolPicked = true
+                                protocolValue = v
+                            },
+                            viewDistance = viewDistance,
+                            onViewDistance = { viewDistance = it },
+                            chatMode = chatMode,
+                            onChatMode = { chatMode = it },
+                            accountKey = accountKey,
+                            accounts = accounts,
+                            onAccountKey = { accountKey = it },
+                            onOpenAccounts = {
+                                flushNow()
+                                onOpenAccounts()
+                            },
+                            onClearToken = {
+                                val key = accountKey.ifBlank { KeystoreTokenStore.DEFAULT_KEY }
+                                session.clearToken(key)
+                                scope.launch { snackbarHostState.showSnackbar("Saved login token cleared") }
+                            },
+                        )
+                        1 -> CommandsSettingsTab(
+                            chatCommand = chatCommand,
+                            onChatCommand = { chatCommand = it },
+                            delayText = delayText,
+                            onDelayText = { delayText = it },
+                            loopCommand = loopCommand,
+                            onLoopCommand = { loopCommand = it },
+                            triggers = triggers,
+                            onTriggers = { triggers = it },
+                            onDeleteTrigger = { idx ->
+                                val removed = triggers[idx]
+                                triggers = triggers.filterIndexed { i, _ -> i != idx }
+                                scope.launch {
+                                    val res = snackbarHostState.showSnackbar(
+                                        message = "Removed trigger \"${removed.match}\"",
+                                        actionLabel = "Undo",
+                                        duration = SnackbarDuration.Short,
+                                    )
+                                    if (res == SnackbarResult.ActionPerformed) {
+                                        val insertAt = idx.coerceIn(0, triggers.size)
+                                        triggers = triggers.toMutableList().apply { add(insertAt, removed) }
+                                    }
+                                }
+                            },
+                        )
+                        2 -> AfkSettingsTab(
+                            antiAfkMode = antiAfkMode,
+                            onAntiAfkMode = { antiAfkMode = it },
+                            autoRespawn = autoRespawn,
+                            onAutoRespawn = { autoRespawn = it },
+                            autoStopMinutes = autoStopMinutes,
+                            onAutoStopMinutes = { autoStopMinutes = it },
+                        )
+                        3 -> SafetySettingsTab(
+                            lowHealthThreshold = lowHealthThreshold,
+                            onLowHealthThreshold = { lowHealthThreshold = it },
+                            alertsMask = alertsMask,
+                            onAlertsMask = { alertsMask = it },
+                            alertKeyword = alertKeyword,
+                            onAlertKeyword = { alertKeyword = it },
+                            webhookUrl = webhookUrl,
+                            onWebhookUrl = { webhookUrl = it },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
-                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -394,7 +460,7 @@ private fun GeneralSettingsTab(
                 Text("View distance", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     if (viewDistance == 2) "2 chunks · min data" else "$viewDistance chunks",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelMedium.tabular(),
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -524,6 +590,7 @@ private fun CommandsSettingsTab(
     onLoopCommand: (Boolean) -> Unit,
     triggers: List<ChatTrigger>,
     onTriggers: (List<ChatTrigger>) -> Unit,
+    onDeleteTrigger: (Int) -> Unit,
 ) {
     var showAddTrigger by remember { mutableStateOf(false) }
 
@@ -599,9 +666,7 @@ private fun CommandsSettingsTab(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        IconButton(onClick = {
-                            onTriggers(triggers.filterIndexed { i, _ -> i != idx })
-                        }) {
+                        IconButton(onClick = { onDeleteTrigger(idx) }) {
                             Icon(Icons.Default.Delete, contentDescription = "Remove trigger")
                         }
                     }
@@ -794,7 +859,7 @@ private fun SafetySettingsTab(
                     Text("Disconnect at or below", style = MaterialTheme.typography.bodySmall)
                     Text(
                         "♥ $hearts / 10 hearts",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.tabular(),
                         color = MaterialTheme.colorScheme.error,
                     )
                 }

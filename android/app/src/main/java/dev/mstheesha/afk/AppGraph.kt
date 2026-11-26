@@ -17,6 +17,7 @@ object AppGraph {
     private val sessions = mutableMapOf<Long, ServerSession>()
     private val sessionJobs = mutableMapOf<Long, Job>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _activeCount = MutableStateFlow(0)
     val activeCount: Flow<Int> get() = _activeCount
@@ -61,6 +62,7 @@ object AppGraph {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        Prefs.init(context)
         if (!::db.isInitialized) db = AfkDatabase.get(context)
         EngineHost.init(context)
         AlertNotifier.ensureChannel(context)

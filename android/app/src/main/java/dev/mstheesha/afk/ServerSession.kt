@@ -70,9 +70,8 @@ class ServerSession(private val context: Context, val serverId: Long) {
     private val _bytesOut = MutableStateFlow(0L)
     val bytesOut: StateFlow<Long> = _bytesOut
 
-    @Volatile
-    var kickedCount = 0
-        private set
+    private val _kickedCount = MutableStateFlow(0)
+    val kickedCount: StateFlow<Int> = _kickedCount
 
     private var serverDisplayName = "Server $serverId"
     private var lastAuthLabel = ""
@@ -264,7 +263,7 @@ class ServerSession(private val context: Context, val serverId: Long) {
         _food.value = snapshot.food
         _pingMs.value = snapshot.pingMs
         if (snapshot.versionName.isNotBlank()) _versionName.value = snapshot.versionName
-        kickedCount = snapshot.kicks
+        _kickedCount.value = snapshot.kicks
         when (snapshot.phase) {
             Phase.STOPPED -> {
                 setState("disconnected")

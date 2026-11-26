@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,14 +25,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -43,7 +40,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,7 +52,8 @@ import androidx.compose.ui.unit.dp
 import java.util.UUID
 
 /**
- * Clean bottom sheet for managing multiple encrypted Microsoft accounts.
+ * Clean bottom sheet for managing multiple encrypted Microsoft accounts, with
+ * confirmation before removing a signed-in account.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +65,7 @@ fun AccountsSheet(onDismiss: () -> Unit) {
     var signingIn by remember { mutableStateOf(false) }
     var deviceCode by remember { mutableStateOf<Pair<String, String>?>(null) }
     var statusError by remember { mutableStateOf<String?>(null) }
+    var pendingDelete by remember { mutableStateOf<AccountInfo?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -129,10 +127,7 @@ fun AccountsSheet(onDismiss: () -> Unit) {
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    acc.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
+                                Text(acc.name, style = MaterialTheme.typography.titleSmall)
                                 Text(
                                     if (acc.key == KeystoreTokenStore.DEFAULT_KEY) "Default slot"
                                     else "Alt · ${acc.uuid.take(8)}",
@@ -140,7 +135,7 @@ fun AccountsSheet(onDismiss: () -> Unit) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            IconButton(onClick = { EngineHost.clearTokens(acc.key) }) {
+                            IconButton(onClick = { pendingDelete = acc }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Remove account")
                             }
                         }
@@ -180,7 +175,10 @@ fun AccountsSheet(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (signingIn) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    ExpressiveLoadingIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        size = 18.dp,
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("Waiting for sign-in…")
                 } else {
@@ -190,6 +188,25 @@ fun AccountsSheet(onDismiss: () -> Unit) {
                 }
             }
         }
+    }
+
+    pendingDelete?.let { acc ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove account?") },
+            text = { Text("Remove \"${acc.name}\" from this device? Servers using it will ask to sign in again.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    EngineHost.clearTokens(acc.key)
+                    pendingDelete = null
+                }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
     }
 
     deviceCode?.let { (url, code) ->
@@ -223,25 +240,24 @@ fun AccountsSheet(onDismiss: () -> Unit) {
 
 /**
  * Clean bottom sheet for app-wide appearance, battery/network guardrails,
- * bot concurrency limit, and quick chat commands.
+ * bot concurrency limit, and quick chat commands — all wired to reactive [Prefs] StateFlows.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AppSettingsSheet(
-    themeMode: ThemeMode,
-    dynamicColor: Boolean,
-    onThemeMode: (ThemeMode) -> Unit,
-    onDynamicColor: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var wifiOnly by remember { mutableStateOf(Prefs.wifiOnly(context)) }
-    var batteryGuard by remember { mutableIntStateOf(Prefs.batteryGuardPercent(context)) }
-    var maxBots by remember { mutableIntStateOf(Prefs.maxBots(context)) }
-    var timestamps by remember { mutableStateOf(Prefs.chatTimestamps(context)) }
-    var quickCmdsText by remember { mutableStateOf(Prefs.quickCommands(context).joinToString("\n")) }
+    val themeMode by Prefs.themeModeFlow.collectAsState()
+    val dynamicColor by Prefs.dynamicColorFlow.collectAsState()
+    val wifiOnly by Prefs.wifiOnlyFlow.collectAsState()
+    val batteryGuard by Prefs.batteryGuardFlow.collectAsState()
+    val maxBots by Prefs.maxBotsFlow.collectAsState()
+    val timestamps by Prefs.chatTimestampsFlow.collectAsState()
+    val quickCmds by Prefs.quickCommandsFlow.collectAsState()
+    var quickCmdsText by remember { mutableStateOf(quickCmds.joinToString("\n")) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -285,7 +301,7 @@ fun AppSettingsSheet(
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(
                                 selected = themeMode == mode,
-                                onClick = { onThemeMode(mode) },
+                                onClick = { Prefs.setThemeMode(context, mode) },
                                 label = { Text(mode.label) },
                             )
                         }
@@ -303,7 +319,10 @@ fun AppSettingsSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(checked = dynamicColor, onCheckedChange = onDynamicColor)
+                        Switch(
+                            checked = dynamicColor,
+                            onCheckedChange = { Prefs.setDynamicColor(context, it) },
+                        )
                     }
                 }
             }
@@ -336,7 +355,6 @@ fun AppSettingsSheet(
                         Switch(
                             checked = wifiOnly,
                             onCheckedChange = { v ->
-                                wifiOnly = v
                                 Prefs.setWifiOnly(context, v)
                                 if (AppGraph.hasActiveSessions()) {
                                     context.startService(
@@ -353,10 +371,7 @@ fun AppSettingsSheet(
                             listOf(0 to "Off", 10 to "10%", 15 to "15%", 20 to "20%").forEach { (pct, label) ->
                                 FilterChip(
                                     selected = batteryGuard == pct,
-                                    onClick = {
-                                        batteryGuard = pct
-                                        Prefs.setBatteryGuardPercent(context, pct)
-                                    },
+                                    onClick = { Prefs.setBatteryGuardPercent(context, pct) },
                                     label = { Text(label) },
                                 )
                             }
@@ -368,10 +383,7 @@ fun AppSettingsSheet(
                             listOf(0 to "Unlimited", 3 to "3", 6 to "6", 10 to "10").forEach { (cap, label) ->
                                 FilterChip(
                                     selected = maxBots == cap,
-                                    onClick = {
-                                        maxBots = cap
-                                        Prefs.setMaxBots(context, cap)
-                                    },
+                                    onClick = { Prefs.setMaxBots(context, cap) },
                                     label = { Text(label) },
                                 )
                             }
@@ -400,10 +412,7 @@ fun AppSettingsSheet(
                         Text("Show chat timestamps", style = MaterialTheme.typography.bodyLarge)
                         Switch(
                             checked = timestamps,
-                            onCheckedChange = {
-                                timestamps = it
-                                Prefs.setChatTimestamps(context, it)
-                            },
+                            onCheckedChange = { Prefs.setChatTimestamps(context, it) },
                         )
                     }
                     OutlinedTextField(
