@@ -8,3 +8,8 @@
 -keep interface dev.mstheesha.afk.engine.BotListener { *; }
 -keep class dev.mstheesha.afk.engine.BotConfig { *; }
 -keep class dev.mstheesha.afk.engine.BotSnapshot { *; }
+-keep class dev.mstheesha.afk.engine.AntiAfkMode { *; }
+-keep class dev.mstheesha.afk.engine.ChatTrigger { *; }
+-keep class dev.mstheesha.afk.engine.BotEvent { *; }
+-keep class dev.mstheesha.afk.engine.BotEventKind { *; }
+-keep class dev.mstheesha.afk.engine.ServerListPing { public *; }

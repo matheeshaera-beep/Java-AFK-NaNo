@@ -1,0 +1,31 @@
+name: Attach Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the APK to"
+        required: true
+        default: "v3.8"
+      apk:
+        description: "Path to the APK file in the repository"
+        required: true
+        default: "dist/JavaAFK-3.8.apk"
+
+permissions:
+  contents: write
+
+jobs:
+  attach-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Upload APK to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || 'v3.8' }}
+          APK_PATH: ${{ inputs.apk || 'dist/JavaAFK-3.8.apk' }}
+        run: |
+          gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber

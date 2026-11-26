@@ -5,20 +5,24 @@ import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
-/** Server List Ping: used to detect the protocol version before logging in. */
-internal object ServerListPing {
+/** Server List Ping: used to detect the protocol version, latency, and favicon. */
+object ServerListPing {
     data class Result(
         val protocol: Int,
         val versionName: String,
         val motd: String,
         val favicon: String?,
+        val latencyMs: Int = -1,
     )
 
     fun ping(host: String, port: Int, timeoutMs: Int = 6_000): Result {
+        val target = HostPolicy.resolve(host, port)
         val socket = Socket()
         try {
             socket.tcpNoDelay = true
-            socket.connect(InetSocketAddress(host, port), timeoutMs)
+            val connectStart = System.nanoTime()
+            socket.connect(InetSocketAddress(target.host, target.port), timeoutMs)
+            val latencyMs = ((System.nanoTime() - connectStart) / 1_000_000L).toInt().coerceAtLeast(1)
             socket.soTimeout = timeoutMs
             val out = DataOutputStream(socket.getOutputStream())
             val input = DataInputStream(socket.getInputStream())
@@ -50,7 +54,7 @@ internal object ServerListPing {
             val name = version?.str("name") ?: ""
             val motd = ChatText.flatten(root["description"])
             val favicon = root.str("favicon")
-            return Result(protocol, name, motd, favicon)
+            return Result(protocol, name, motd, favicon, latencyMs)
         } finally {
             try {
                 socket.close()

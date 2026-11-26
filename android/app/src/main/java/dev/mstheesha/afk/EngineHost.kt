@@ -3,7 +3,9 @@ package dev.mstheesha.afk
 import android.content.Context
 import dev.mstheesha.afk.engine.AfkEngine
 import dev.mstheesha.afk.engine.BotListener
-import dev.mstheesha.afk.engine.TokenStore
+import dev.mstheesha.afk.engine.StoredTokens
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -13,16 +15,14 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object EngineHost {
 
-    /** Same ceiling the UI and the notification were written against. */
-    const val MAX_BOTS = 6
-
     private val listeners = ConcurrentHashMap<Long, BotListener>()
+    private val emptyAccounts = MutableStateFlow<List<AccountInfo>>(emptyList())
 
     @Volatile
     private var engineInstance: AfkEngine? = null
 
     @Volatile
-    private var tokenStore: TokenStore? = null
+    private var tokenStore: KeystoreTokenStore? = null
 
     @Synchronized
     fun init(context: Context) {
@@ -38,6 +38,8 @@ object EngineHost {
     fun engine(): AfkEngine = engineInstance
         ?: throw IllegalStateException("EngineHost.init() was not called")
 
+    fun accountsFlow(): StateFlow<List<AccountInfo>> = tokenStore?.accounts ?: emptyAccounts
+
     fun register(id: Long, listener: BotListener) {
         listeners[id] = listener
     }
@@ -46,8 +48,28 @@ object EngineHost {
         listeners.remove(id)
     }
 
-    fun clearTokens() {
-        tokenStore?.clear()
+    fun clearTokens(accountKey: String = KeystoreTokenStore.DEFAULT_KEY) {
+        tokenStore?.clear(accountKey)
+    }
+
+    fun signInAccount(
+        accountKey: String,
+        onCode: (url: String, code: String) -> Unit,
+        onResult: (Result<StoredTokens>) -> Unit,
+    ) {
+        engine().signInAccount(accountKey, onCode, onResult)
+    }
+
+    fun setUiVisible(visible: Boolean) {
+        engineInstance?.setUiVisible(visible)
+    }
+
+    fun setNetworkAvailable(available: Boolean) {
+        engineInstance?.setNetworkAvailable(available)
+    }
+
+    fun trimMemory() {
+        engineInstance?.trimMemory()
     }
 
     private object NoopListener : BotListener {

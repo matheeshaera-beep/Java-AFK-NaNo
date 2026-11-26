@@ -18,14 +18,10 @@ import kotlinx.coroutines.launch
 class AfkService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var networkGuard: NetworkGuard? = null
     private val scope = MainScope()
 
-    /** True once startForeground() succeeded, so teardown only touches a
-     *  notification that actually exists. */
     private var foregroundStarted = false
-
-    /** Set by [stopEverything] so the state collectors cannot trigger a second
-     *  teardown. Cleared by the next start command, which revives the service. */
     private var stopping = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -38,43 +34,37 @@ class AfkService : Service() {
                 NotificationChannel(CHANNEL_ID, "AFK session", NotificationManager.IMPORTANCE_LOW),
             )
         }
-        // Rebuild the notification whenever the active-server set changes.
+        networkGuard = NetworkGuard(this).also { it.start() }
         scope.launch {
             AppGraph.namesTick.collect { refreshNotification() }
         }
-        // The wake lock follows the active-session count: held while at
-        // least one bot runs, released as soon as the last one stops so the
-        // phone can sleep with zero bots.
         scope.launch {
             AppGraph.activeCount.collect { onActiveCount(it) }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // A fresh start command revives the service: clear the teardown latch
-        // so a bot started again right after the last one stopped can post its
-        // notification and hold its wake lock.
         stopping = false
-        // START_NOT_STICKY: after a process kill Android must NOT restart us
-        // with a null intent (that used to leave a notification + wake lock
-        // with no Node and no bot behind).
         if (intent == null) {
             stopEverything()
             return START_NOT_STICKY
         }
-        if (intent.action == ACTION_STOP) {
-            // Force-stop: disconnect every session first so nothing is left
-            // showing a stale Connected state, then drop the foreground
-            // notification, release the wake lock, and stop the service.
-            // (The app window itself stays open; it is only a viewer.)
-            AppGraph.stopAllSessions()
-            stopEverything()
-            return START_NOT_STICKY
+        when (intent.action) {
+            ACTION_STOP -> {
+                AppGraph.stopAllSessions()
+                stopEverything()
+                return START_NOT_STICKY
+            }
+            ACTION_RECONNECT -> {
+                AppGraph.reconnectAllSessions()
+                refreshNotification()
+                return START_NOT_STICKY
+            }
+            ACTION_REFRESH_GUARD -> {
+                networkGuard?.evaluateNetwork()
+                return START_NOT_STICKY
+            }
         }
-        // ACTION_START. Only become a foreground service when a bot is
-        // actually connecting/running: the Start button flips the session to
-        // 'connecting' before sending this intent, so no active session here
-        // means the start did not take and there is nothing to keep alive.
         if (!AppGraph.hasActiveSessions()) {
             stopEverything()
             return START_NOT_STICKY
@@ -83,27 +73,27 @@ class AfkService : Service() {
         return START_NOT_STICKY
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_BACKGROUND) {
+            AppGraph.trimMemory()
+        }
+    }
+
     private fun onActiveCount(n: Int) {
         if (stopping) return
         if (n > 0) {
-            // A session became active. If ACTION_START already ran, keep the
-            // wake lock held and refresh the text; otherwise onStartCommand
-            // posts the notification itself.
             if (!foregroundStarted) return
             acquireWakeLock()
             refreshNotification()
             return
         }
-        // Count reached zero. The StateFlow emission can lag a transition, so
-        // re-check the sessions synchronously: a bot that just started (or is
-        // reconnecting) must not tear the service down.
         if (!foregroundStarted) return
         if (AppGraph.hasActiveSessions()) return
         stopEverything()
     }
 
     private fun startForegroundCompat() {
-        // No active session means no notification: never post a placeholder.
         val names = AppGraph.activeServerNames()
         if (names.isEmpty()) {
             stopEverything()
@@ -121,24 +111,41 @@ class AfkService : Service() {
 
     private fun buildNotification(names: List<String>): Notification {
         val openApp = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val reconnectAll = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, AfkService::class.java).setAction(ACTION_RECONNECT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stopService = PendingIntent.getService(
-            this, 1,
+            this,
+            1,
             Intent(this, AfkService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val title = if (names.size == 1) "Java AFK · 1 bot active" else "Java AFK · ${names.size} bots active"
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Java AFK active")
+            .setContentTitle(title)
             .setContentText(names.joinToString(", "))
             .setSmallIcon(R.drawable.ic_stat_afk)
             .setContentIntent(openApp)
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_popup_sync),
+                    "Reconnect",
+                    reconnectAll,
+                ).build(),
+            )
+            .addAction(
+                Notification.Action.Builder(
                     Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Stop service",
+                    "Stop all",
                     stopService,
                 ).build(),
             )
@@ -147,7 +154,6 @@ class AfkService : Service() {
 
     private fun refreshNotification() {
         if (!foregroundStarted || stopping) return
-        // Never keep a notification (or the service) alive with no sessions.
         if (!AppGraph.hasActiveSessions()) {
             stopEverything()
             return
@@ -156,7 +162,6 @@ class AfkService : Service() {
         nm.notify(NOTIFICATION_ID, buildNotification(AppGraph.activeServerNames()))
     }
 
-    /** Single teardown path: wake lock, foreground notification, service. */
     private fun stopEverything() {
         if (stopping) return
         stopping = true
@@ -165,7 +170,6 @@ class AfkService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             foregroundStarted = false
         } else {
-            // Drop any notification left over from an earlier incarnation.
             getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
         }
         stopSelf()
@@ -190,6 +194,8 @@ class AfkService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        networkGuard?.stop()
+        networkGuard = null
         scope.cancel()
         releaseWakeLock()
         if (foregroundStarted) {
@@ -204,5 +210,7 @@ class AfkService : Service() {
         const val NOTIFICATION_ID = 1
         const val ACTION_START = "dev.mstheesha.afk.START"
         const val ACTION_STOP = "dev.mstheesha.afk.STOP"
+        const val ACTION_RECONNECT = "dev.mstheesha.afk.RECONNECT"
+        const val ACTION_REFRESH_GUARD = "dev.mstheesha.afk.REFRESH_GUARD"
     }
 }

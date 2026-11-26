@@ -6,6 +6,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import dev.mstheesha.afk.engine.StoredTokens
 import dev.mstheesha.afk.engine.TokenStore
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
@@ -14,11 +16,18 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+data class AccountInfo(
+    val key: String,
+    val name: String,
+    val uuid: String,
+)
+
 /**
  * Tokens live in SharedPreferences encrypted with a non-exportable AES-GCM key
- * held by the Android Keystore. Nothing usable is written to disk in the clear,
- * and `android:allowBackup="false"` keeps the blob off cloud backups (the key
- * would not travel with it anyway).
+ * held by the Android Keystore. Multiple Microsoft accounts are stored inside
+ * one encrypted JSON map (`accounts_v2`), migrating single-account v1 blobs
+ * automatically. Nothing usable is written to disk in the clear, and
+ * `android:allowBackup="false"` keeps the blob off cloud backups.
  */
 class KeystoreTokenStore(context: Context) : TokenStore {
 
@@ -26,36 +35,113 @@ class KeystoreTokenStore(context: Context) : TokenStore {
         .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val filesDir = context.applicationContext.filesDir
 
-    override fun load(): StoredTokens? {
+    private val _accounts = MutableStateFlow<List<AccountInfo>>(emptyList())
+    val accounts: StateFlow<List<AccountInfo>> = _accounts
+
+    init {
+        _accounts.value = listAccounts()
+    }
+
+    override fun load(): StoredTokens? = load(DEFAULT_KEY)
+
+    override fun save(tokens: StoredTokens) = save(DEFAULT_KEY, tokens)
+
+    override fun clear() = clear(DEFAULT_KEY)
+
+    @Synchronized
+    override fun load(accountKey: String): StoredTokens? {
+        val key = normalizeKey(accountKey)
+        return loadAllLocked()[key]
+    }
+
+    @Synchronized
+    override fun save(accountKey: String, tokens: StoredTokens) {
+        val key = normalizeKey(accountKey)
+        val map = loadAllLocked().toMutableMap()
+        map[key] = tokens
+        saveAllLocked(map)
+    }
+
+    @Synchronized
+    override fun clear(accountKey: String) {
+        val key = normalizeKey(accountKey)
+        val map = loadAllLocked().toMutableMap()
+        map.remove(key)
+        if (map.isEmpty()) {
+            prefs.edit().remove(KEY_ACCOUNTS).remove(KEY_BLOB).apply()
+            deleteLegacy()
+            _accounts.value = emptyList()
+        } else {
+            saveAllLocked(map)
+        }
+    }
+
+    @Synchronized
+    fun listAccounts(): List<AccountInfo> = toAccountList(loadAllLocked())
+
+    private fun normalizeKey(raw: String): String = raw.trim().ifBlank { DEFAULT_KEY }
+
+    private fun loadAllLocked(): Map<String, StoredTokens> {
+        val multiBlob = prefs.getString(KEY_ACCOUNTS, null)
+        if (multiBlob != null) {
+            val text = try {
+                decrypt(multiBlob)
+            } catch (e: Exception) {
+                prefs.edit().remove(KEY_ACCOUNTS).apply()
+                return emptyMap()
+            }
+            val root = runCatching { JSONObject(text) }.getOrNull() ?: return emptyMap()
+            val out = LinkedHashMap<String, StoredTokens>()
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val obj = root.optJSONObject(k) ?: continue
+                out[k] = fromJson(obj)
+            }
+            return out
+        }
+
+        // One-time migration from v1 single-account blob or 2.4 plaintext files.
+        val legacySingle = loadLegacySingleLocked() ?: return emptyMap()
+        val migrated = linkedMapOf(DEFAULT_KEY to legacySingle)
+        saveAllLocked(migrated)
+        prefs.edit().remove(KEY_BLOB).apply()
+        return migrated
+    }
+
+    private fun saveAllLocked(map: Map<String, StoredTokens>) {
+        val root = JSONObject()
+        for ((k, v) in map) {
+            root.put(k, toJson(v))
+        }
+        runCatching {
+            prefs.edit().putString(KEY_ACCOUNTS, encrypt(root.toString())).apply()
+        }
+        _accounts.value = toAccountList(map)
+    }
+
+    private fun toAccountList(map: Map<String, StoredTokens>): List<AccountInfo> =
+        map.entries.map { (key, tok) ->
+            AccountInfo(
+                key = key,
+                name = tok.name.ifBlank { if (key == DEFAULT_KEY) "Default account" else key },
+                uuid = tok.uuid,
+            )
+        }
+
+    private fun loadLegacySingleLocked(): StoredTokens? {
         val blob = prefs.getString(KEY_BLOB, null) ?: return migrateLegacy()
         val text = try {
             decrypt(blob)
         } catch (e: Exception) {
-            // Key rotated/lost (restore to a new device): drop the unreadable blob.
             prefs.edit().remove(KEY_BLOB).apply()
             return migrateLegacy()
         }
         return runCatching { fromJson(JSONObject(text)) }.getOrNull()
     }
 
-    override fun save(tokens: StoredTokens) {
-        runCatching {
-            prefs.edit().putString(KEY_BLOB, encrypt(toJson(tokens).toString())).apply()
-        }
-    }
-
-    override fun clear() {
-        prefs.edit().remove(KEY_BLOB).apply()
-        deleteLegacy()
-    }
-
     // ------------------------------------------------------------- legacy import
 
-    /**
-     * 2.4 kept credentials in `ms_token.json` and mineflayer's `minecraft-auth`
-     * profile folder. Both are best-effort scanned once; a successful import is
-     * re-encrypted and the plaintext files are deleted.
-     */
     private fun migrateLegacy(): StoredTokens? {
         val candidates = buildList {
             add(File(filesDir, "ms_token.json"))
@@ -66,7 +152,6 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             if (!file.isFile) continue
             val tokens = runCatching { parseLegacy(file.readText()) }.getOrNull() ?: continue
             if (tokens.refreshToken.isBlank() && tokens.accessToken.isBlank()) continue
-            save(tokens)
             deleteLegacy()
             return tokens
         }
@@ -82,7 +167,6 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             }
             return ""
         }
-        // mineflayer/msal nests the token payload one level down.
         val nested = root.optJSONObject("token") ?: root.optJSONObject("data")
         fun pickDeep(vararg names: String): String {
             val direct = pick(*names)
@@ -162,11 +246,13 @@ class KeystoreTokenStore(context: Context) : TokenStore {
         return generator.generateKey()
     }
 
-    private companion object {
-        const val PREFS = "afk_secure"
-        const val KEY_BLOB = "tokens"
-        const val KEY_ALIAS = "afk.tokens.v1"
-        const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val TRANSFORMATION = "AES/GCM/NoPadding"
+    companion object {
+        const val DEFAULT_KEY = "default"
+        private const val PREFS = "afk_secure"
+        private const val KEY_BLOB = "tokens"
+        private const val KEY_ACCOUNTS = "accounts_v2"
+        private const val KEY_ALIAS = "afk.tokens.v1"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val TRANSFORMATION = "AES/GCM/NoPadding"
     }
 }

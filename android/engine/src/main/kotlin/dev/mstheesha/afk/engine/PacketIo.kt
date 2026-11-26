@@ -13,6 +13,11 @@ internal class PacketWriter(initial: Int = 256) {
         size = 0
     }
 
+    fun shrinkIfLarge(initial: Int = 1024, maxRetain: Int = 32 * 1024) {
+        if (buf.size > maxRetain) buf = ByteArray(initial)
+        size = 0
+    }
+
     private fun ensure(extra: Int) {
         if (size + extra <= buf.size) return
         var cap = buf.size
@@ -99,12 +104,19 @@ internal class PacketWriter(initial: Int = 256) {
     }
 }
 
-/** Zero-copy view over one decoded frame. */
+/** Zero-copy view over one decoded frame (also reusable via [reset]). */
 internal class PacketReader(
-    private val buf: ByteArray,
-    private var pos: Int,
-    private val end: Int,
+    private var buf: ByteArray = ByteArray(0),
+    private var pos: Int = 0,
+    private var end: Int = 0,
 ) {
+    fun reset(buf: ByteArray, pos: Int, end: Int): PacketReader {
+        this.buf = buf
+        this.pos = pos
+        this.end = end
+        return this
+    }
+
     fun remaining(): Int = end - pos
 
     fun readVarInt(): Int {

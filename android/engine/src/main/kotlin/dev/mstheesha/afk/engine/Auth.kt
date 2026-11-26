@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal class MicrosoftAuth(
     private val store: TokenStore?,
+    private val accountKey: String = "default",
     private val onDeviceCode: (url: String, code: String) -> Unit,
 ) {
     companion object {
@@ -69,7 +70,7 @@ internal class MicrosoftAuth(
     private fun obtainAccessToken(): String {
         if (accessToken.isNotBlank()) return accessToken
         val saved = try {
-            store?.load()
+            store?.load(accountKey)
         } catch (e: Exception) {
             null
         }
@@ -117,8 +118,8 @@ internal class MicrosoftAuth(
             profileUuid = id
             profileName = name
             val current = store ?: return
-            val saved = current.load() ?: return
-            current.save(saved.copy(accessToken = accessToken, uuid = id, name = name))
+            val saved = current.load(accountKey) ?: return
+            current.save(accountKey, saved.copy(accessToken = accessToken, uuid = id, name = name))
         } catch (_: Exception) {
             // Leave blank; ensureAccessToken decides whether that is fatal.
         }
@@ -149,7 +150,7 @@ internal class MicrosoftAuth(
         profileUuid = ""
         profileName = ""
         try {
-            store?.clear()
+            store?.clear(accountKey)
         } catch (_: Exception) {
         }
     }
@@ -249,6 +250,7 @@ internal class MicrosoftAuth(
         profileName = profile.second
         try {
             store?.save(
+                accountKey,
                 StoredTokens(
                     refreshToken = refreshToken,
                     accessToken = mc,

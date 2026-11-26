@@ -15,6 +15,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
+object AlertFlags {
+    const val KICK = 1 shl 0
+    const val DEATH = 1 shl 1
+    const val LOW_HEALTH = 1 shl 2
+    const val KEYWORD = 1 shl 3
+    const val WHISPER = 1 shl 4
+}
+
 @Entity(tableName = "servers")
 data class ServerEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
@@ -31,6 +39,21 @@ data class ServerEntity(
     val loopCommand: Boolean = false,
     /** 0 = auto-detect via Server List Ping, otherwise a fixed protocol number. */
     val protocolOverride: Int = 0,
+    /** Key in KeystoreTokenStore; blank uses "default". */
+    val accountKey: String = "",
+    /** off | jump | look | mix */
+    val antiAfkMode: String = "jump",
+    val autoRespawn: Boolean = true,
+    /** 0 = disabled, otherwise health threshold in half-hearts (2..18 = 1..9 hearts). */
+    val lowHealthDisconnect: Int = 0,
+    /** JSON array of [{"m":"match","c":"cmd","d":2}]. */
+    val chatTriggersJson: String = "",
+    /** 0 = disabled, otherwise auto-stop session after N minutes. */
+    val autoStopMinutes: Int = 0,
+    /** Bitmask of [AlertFlags]. */
+    val alertsMask: Int = 0,
+    val alertKeyword: String = "",
+    val webhookUrl: String = "",
 )
 
 @Dao
@@ -55,7 +78,7 @@ interface ServerDao {
     suspend fun delete(server: ServerEntity)
 }
 
-@Database(entities = [ServerEntity::class], version = 7, exportSchema = false)
+@Database(entities = [ServerEntity::class], version = 8, exportSchema = false)
 abstract class AfkDatabase : RoomDatabase() {
     abstract fun serverDao(): ServerDao
 
@@ -100,6 +123,23 @@ abstract class AfkDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE servers ADD COLUMN accountKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE servers ADD COLUMN antiAfkMode TEXT NOT NULL DEFAULT 'jump'")
+                db.execSQL("ALTER TABLE servers ADD COLUMN autoRespawn INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE servers ADD COLUMN lowHealthDisconnect INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN chatTriggersJson TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE servers ADD COLUMN autoStopMinutes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN alertsMask INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE servers ADD COLUMN alertKeyword TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE servers ADD COLUMN webhookUrl TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    "UPDATE servers SET antiAfkMode = CASE WHEN autoJump = 0 THEN 'off' ELSE 'jump' END",
+                )
+            }
+        }
+
         fun get(context: Context): AfkDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -113,6 +153,7 @@ abstract class AfkDatabase : RoomDatabase() {
                     MIGRATION_4_5,
                     MIGRATION_5_6,
                     MIGRATION_6_7,
+                    MIGRATION_7_8,
                 )
                     .build().also { instance = it }
             }

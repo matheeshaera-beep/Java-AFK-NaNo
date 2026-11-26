@@ -9,15 +9,50 @@ import javax.crypto.spec.SecretKeySpec
 internal enum class ConnState { HANDSHAKE, STATUS, LOGIN, CONFIG, PLAY }
 
 /**
+ * Reusable scratch buffers owned by one [AfkEngine] and shared across all of
+ * its [Connection]s on the single `afk-engine` thread.
+ */
+internal class EngineScratch {
+    val out = PacketWriter(256)
+    val frame = PacketWriter(Connection.WRITE_INITIAL)
+    val reader = PacketReader()
+    var cryptBuf = ByteArray(0)
+
+    fun ensureCrypt(size: Int): ByteArray {
+        if (cryptBuf.size < size) {
+            var cap = if (cryptBuf.isEmpty()) 4096 else cryptBuf.size
+            while (cap < size) cap = cap shl 1
+            cryptBuf = ByteArray(cap)
+        }
+        return cryptBuf
+    }
+
+    fun maybeShrink() {
+        out.shrinkIfLarge(256, 32 * 1024)
+        frame.shrinkIfLarge(Connection.WRITE_INITIAL, 32 * 1024)
+        if (cryptBuf.size > 32 * 1024) cryptBuf = ByteArray(4096)
+    }
+
+    fun shrink() {
+        out.shrinkIfLarge(256, 1024)
+        frame.shrinkIfLarge(Connection.WRITE_INITIAL, 4096)
+        if (cryptBuf.size > 4096) cryptBuf = ByteArray(0)
+    }
+}
+
+/**
  * One bot's socket, buffers, ciphers and frame decoder. Every method is called
  * from the engine thread only.
  */
 internal class Connection(
     val channel: SocketChannel,
     private val bot: BotSession,
+    private val scratch: EngineScratch = EngineScratch(),
 ) {
     companion object {
         const val MAX_FRAME = 256 * 1024
+        /** Upper sanity cap for streaming-skipped frames (e.g. giant modded chunks/maps). */
+        const val MAX_SKIP_FRAME = 16 * 1024 * 1024
         const val READ_INITIAL = 4096
         const val WRITE_INITIAL = 1024
     }
@@ -36,11 +71,8 @@ internal class Connection(
     private var readBuf = ByteArray(READ_INITIAL)
     private var readStart = 0
     private var readEnd = 0
-    private var cryptBuf = ByteArray(0)
+    private var skipRemaining = 0
     private var loginFramesLogged = 0
-
-    private val out = PacketWriter(256)
-    private val frame = PacketWriter(WRITE_INITIAL)
 
     private val writeQueue = ArrayDeque<ByteArray>()
     private var queueOffset = 0
@@ -74,16 +106,16 @@ internal class Connection(
             if (cipher == null) {
                 readEnd += n
             } else {
-                // JCE does not promise safe in-place CFB8, so decrypt through a
-                // scratch buffer. Only encrypted (online-mode) bots allocate it.
-                if (cryptBuf.size < n) cryptBuf = ByteArray(n)
-                val produced = cipher.update(readBuf, readEnd, n, cryptBuf, 0)
+                // JCE does not promise safe in-place CFB8, so decrypt through the
+                // engine's shared scratch buffer. Only encrypted bots use it.
+                val crypt = scratch.ensureCrypt(n)
+                val produced = cipher.update(readBuf, readEnd, n, crypt, 0)
                 if (produced != n) {
                     // A provider that buffers partial input would silently
                     // shift every later frame; fail loudly instead.
                     throw ProtocolException("decrypt produced $produced of $n bytes")
                 }
-                System.arraycopy(cryptBuf, 0, readBuf, readEnd, n)
+                System.arraycopy(crypt, 0, readBuf, readEnd, n)
                 readEnd += n
             }
         }
@@ -100,12 +132,42 @@ internal class Connection(
             // While an auth response is in flight the bot cannot handle packets;
             // stop before consuming one so it is decoded after the response.
             if (bot.isPaused()) break
+
+            // Finish discarding an oversized frame (> MAX_FRAME) in-place without
+            // allocating or disconnecting. Incoming bytes were already decrypted
+            // in readFromChannel(), so AES/CFB8 stays synchronized.
+            if (skipRemaining > 0) {
+                val avail = readEnd - readStart
+                if (avail <= 0) break
+                val take = minOf(skipRemaining, avail)
+                readStart += take
+                skipRemaining -= take
+                if (skipRemaining > 0) break
+                frames++
+                continue
+            }
+
             // Use the width actually present on the wire, not varIntSize(value):
             // some proxies emit non-canonical (over-long) frame lengths.
             val headerInfo = readVarIntPacked(readStart, readEnd) ?: break
             val length = (headerInfo ushr 32).toInt()
             val header = (headerInfo and 0xFFFFFFFFL).toInt()
-            if (length < 0 || length > MAX_FRAME) throw ProtocolException("frame length $length")
+            if (length < 0 || length > MAX_SKIP_FRAME) throw ProtocolException("frame length $length")
+            if (length > MAX_FRAME) {
+                // Oversized frame (giant chunk/map/registry payload): skip its
+                // bytes directly without buffering.
+                readStart += header
+                skipRemaining = length
+                val avail = readEnd - readStart
+                if (avail > 0) {
+                    val take = minOf(skipRemaining, avail)
+                    readStart += take
+                    skipRemaining -= take
+                }
+                if (skipRemaining > 0) break
+                frames++
+                continue
+            }
             if (readEnd - readStart < header + length) break
             val payloadStart = readStart + header
             val payloadEnd = payloadStart + length
@@ -121,35 +183,57 @@ internal class Connection(
                 )
             }
             var dataStart = payloadStart
-            var dataEnd = payloadEnd
-            var inflated = false
+            val dataEnd = payloadEnd
+            var compressed = false
+            var dataLength = 0
             if (compressionThreshold >= 0) {
                 val dataInfo = readVarIntPacked(payloadStart, payloadEnd)
                     ?: throw ProtocolException("missing data length")
-                val dataLength = (dataInfo ushr 32).toInt()
+                dataLength = (dataInfo ushr 32).toInt()
                 dataStart = payloadStart + (dataInfo and 0xFFFFFFFFL).toInt()
-                if (dataLength > 0) {
-                    val n = Compression.inflate(readBuf, dataStart, payloadEnd - dataStart, dataLength)
-                    dataStart = 0
-                    dataEnd = n
-                    inflated = true
-                }
+                compressed = dataLength > 0
             }
-            val reader = if (inflated) PacketReader(Compression.scratch(), dataStart, dataEnd)
-            else PacketReader(readBuf, dataStart, dataEnd)
+
             readStart = payloadEnd
             frames++
-            if (reader.remaining() == 0) continue
-            val id = reader.readVarInt()
-            if (id !in 0..255) throw ProtocolException("packet id $id")
-            if (!bot.allows(state, id)) continue
-            if (!bot.handle(state, id, reader)) break
+
+            if (compressed) {
+                // Two-stage inflate: peek the VarInt packet ID first and abort
+                // decompression immediately for disallowed packets (chunks, etc.).
+                val inflatedLen = Compression.inflateIfAllowed(
+                    readBuf,
+                    dataStart,
+                    payloadEnd - dataStart,
+                    dataLength,
+                ) { id -> bot.allows(state, id) }
+                if (inflatedLen <= 0) continue
+                val id = Compression.lastPacketId
+                val reader = scratch.reader.reset(
+                    Compression.scratch(),
+                    Compression.lastHeaderLen,
+                    inflatedLen,
+                )
+                val keepGoing = bot.handle(state, id, reader)
+                if (inflatedLen > 64 * 1024) Compression.maybeShrink()
+                if (!keepGoing) break
+            } else {
+                if (dataStart >= dataEnd) continue
+                val idInfo = readVarIntPacked(dataStart, dataEnd)
+                    ?: throw ProtocolException("truncated packet id")
+                val id = (idInfo ushr 32).toInt()
+                val idLen = (idInfo and 0xFFFFFFFFL).toInt()
+                if (id !in 0..255) throw ProtocolException("packet id $id")
+                if (!bot.allows(state, id)) continue
+                val reader = scratch.reader.reset(readBuf, dataStart + idLen, dataEnd)
+                if (!bot.handle(state, id, reader)) break
+            }
         }
         compact()
         return frames
     }
 
     fun send(id: Int, body: (PacketWriter) -> Unit = {}) {
+        val out = scratch.out
         out.reset()
         out.writeVarInt(id)
         body(out)
@@ -157,6 +241,8 @@ internal class Connection(
     }
 
     private fun writeFrame() {
+        val out = scratch.out
+        val frame = scratch.frame
         frame.reset()
         val threshold = compressionThreshold
         if (threshold >= 0 && out.size >= threshold) {
@@ -177,18 +263,19 @@ internal class Connection(
         }
         val cipher = encrypt
         if (cipher != null) {
-            if (cryptBuf.size < frame.size) cryptBuf = ByteArray(frame.size)
-            val produced = cipher.update(frame.buf, 0, frame.size, cryptBuf, 0)
+            val crypt = scratch.ensureCrypt(frame.size)
+            val produced = cipher.update(frame.buf, 0, frame.size, crypt, 0)
             if (produced != frame.size) {
                 throw ProtocolException("encrypt produced $produced of ${frame.size} bytes")
             }
-            System.arraycopy(cryptBuf, 0, frame.buf, 0, frame.size)
+            System.arraycopy(crypt, 0, frame.buf, 0, frame.size)
         }
         bytesOut += frame.size
-        writeFully()
+        writeFully(frame)
+        if (frame.size > 32 * 1024) scratch.maybeShrink()
     }
 
-    private fun writeFully() {
+    private fun writeFully(frame: PacketWriter) {
         if (writeQueue.isNotEmpty()) {
             writeQueue.addLast(frame.buf.copyOf(frame.size))
             return
@@ -257,6 +344,14 @@ internal class Connection(
         }
     }
 
+    fun shrinkBuffers() {
+        if (readStart == readEnd && readBuf.size > READ_INITIAL) {
+            readBuf = ByteArray(READ_INITIAL)
+            readStart = 0
+            readEnd = 0
+        }
+    }
+
     fun close() {
         try {
             channel.close()
@@ -266,6 +361,7 @@ internal class Connection(
         decrypt = null
         writeQueue.clear()
         queueOffset = 0
+        skipRemaining = 0
     }
 
     /**

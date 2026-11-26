@@ -10,11 +10,20 @@ import java.util.zip.Inflater
  */
 internal object Compression {
     const val MAX_INFLATED = 4 * 1024 * 1024
+    private const val SCRATCH_INITIAL = 16 * 1024
+    private const val SHRINK_THRESHOLD = 64 * 1024
 
     private var inflater = Inflater()
     private var deflater = Deflater(1)
-    private var scratch = ByteArray(16 * 1024)
-    private var deflated = ByteArray(16 * 1024)
+    private var scratch = ByteArray(SCRATCH_INITIAL)
+    private var deflated = ByteArray(SCRATCH_INITIAL)
+    private val headBuf = ByteArray(8)
+
+    /** Packet ID and header length decoded by the most recent [inflateIfAllowed]. */
+    var lastPacketId: Int = -1
+        private set
+    var lastHeaderLen: Int = 0
+        private set
 
     fun scratch(): ByteArray = scratch
 
@@ -53,6 +62,101 @@ internal object Compression {
         return written
     }
 
+    /**
+     * Two-stage partial inflate: inflates only the leading VarInt packet ID
+     * (at most 5 bytes) and asks [allow] whether the packet is needed.
+     *
+     * If disallowed (chunks, entities, lighting, particles — >95% of traffic),
+     * returns `-1` immediately without inflating the remaining payload or
+     * growing [scratch].
+     *
+     * When allowed, finishes inflating into [scratch] and returns the total
+     * uncompressed length (with [lastPacketId] and [lastHeaderLen] populated).
+     */
+    fun inflateIfAllowed(
+        src: ByteArray,
+        off: Int,
+        len: Int,
+        expected: Int,
+        allow: (packetId: Int) -> Boolean,
+    ): Int {
+        if (expected < 0 || expected > MAX_INFLATED) throw ProtocolException("inflated size $expected")
+        if (expected == 0) return 0
+        inflater.reset()
+        inflater.setInput(src, off, len)
+
+        // Stage 1: inflate just enough bytes to decode the VarInt packet ID.
+        val headTarget = minOf(5, expected)
+        var headLen = 0
+        var packetId = 0
+        var shift = 0
+        var idPos = 0
+        var idDone = false
+        try {
+            while (!idDone) {
+                while (idPos < headLen) {
+                    val b = headBuf[idPos++].toInt()
+                    packetId = packetId or ((b and 0x7F) shl shift)
+                    if (b and 0x80 == 0) {
+                        idDone = true
+                        break
+                    }
+                    shift += 7
+                    if (shift > 35) throw ProtocolException("VarInt too big")
+                }
+                if (idDone) break
+                if (headLen >= headTarget || inflater.finished()) {
+                    throw ProtocolException("truncated packet id")
+                }
+                val n = inflater.inflate(headBuf, headLen, headTarget - headLen)
+                if (n == 0) {
+                    if (inflater.needsInput() || inflater.needsDictionary()) {
+                        throw ProtocolException("truncated compressed packet id")
+                    }
+                }
+                headLen += n
+            }
+        } catch (e: DataFormatException) {
+            throw ProtocolException("bad compressed frame: ${e.message}")
+        }
+
+        if (packetId !in 0..255) throw ProtocolException("packet id $packetId")
+        lastPacketId = packetId
+        lastHeaderLen = idPos
+
+        if (!allow(packetId)) {
+            return -1
+        }
+
+        // Stage 2: packet is needed; finish inflating into scratch.
+        ensureScratch(expected)
+        System.arraycopy(headBuf, 0, scratch, 0, headLen)
+        var written = headLen
+        try {
+            while (!inflater.finished()) {
+                if (written >= scratch.size) {
+                    if (scratch.size >= MAX_INFLATED) throw ProtocolException("inflated too big")
+                    ensureScratch(scratch.size * 2)
+                }
+                val n = inflater.inflate(scratch, written, scratch.size - written)
+                if (n == 0) {
+                    if (inflater.needsInput() || inflater.needsDictionary()) break
+                }
+                written += n
+            }
+        } catch (e: DataFormatException) {
+            throw ProtocolException("bad compressed frame: ${e.message}")
+        }
+        if (written != expected) throw ProtocolException("inflated $written, expected $expected")
+        return written
+    }
+
+    /** Release oversized scratch memory promptly after a large frame is handled. */
+    fun maybeShrink() {
+        if (scratch.size > SHRINK_THRESHOLD) scratch = ByteArray(SCRATCH_INITIAL)
+        if (deflated.size > SHRINK_THRESHOLD) deflated = ByteArray(SCRATCH_INITIAL)
+    }
+
     /** Deflates [len] bytes of [src]; returns the written length. */
     fun deflate(src: ByteArray, off: Int, len: Int): Int {
         val bound = (len + (len shr 3) + 64).coerceAtLeast(64)
@@ -75,8 +179,8 @@ internal object Compression {
     fun deflated(): ByteArray = deflated
 
     fun shrink() {
-        if (scratch.size > 16 * 1024) scratch = ByteArray(16 * 1024)
-        if (deflated.size > 16 * 1024) deflated = ByteArray(16 * 1024)
+        if (scratch.size > SCRATCH_INITIAL) scratch = ByteArray(SCRATCH_INITIAL)
+        if (deflated.size > SCRATCH_INITIAL) deflated = ByteArray(SCRATCH_INITIAL)
         inflater.end()
         deflater.end()
         inflater = Inflater()

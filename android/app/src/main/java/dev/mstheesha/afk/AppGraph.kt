@@ -1,5 +1,7 @@
 package dev.mstheesha.afk
 
+import android.content.Context
+import android.content.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,18 +21,21 @@ object AppGraph {
     private val _activeCount = MutableStateFlow(0)
     val activeCount: Flow<Int> get() = _activeCount
 
-    /** True while the UI is in the foreground. The session poll loop uses a
-     *  fast interval then, and a slow one when the screen is off. */
     @Volatile
-    var uiVisible = false
+    var uiVisible: Boolean = false
+        set(value) {
+            field = value
+            EngineHost.setUiVisible(value)
+            if (value) {
+                val all = synchronized(sessions) { sessions.values.toList() }
+                all.forEach { it.flushBuffersIfDirty() }
+            }
+        }
 
-    // Display names for sessions, keyed by server id. The notification reads
-    // these to show which server(s) are actually running.
     private val serverNames = mutableMapOf<Long, String>()
     private val _namesTick = MutableStateFlow(0)
     val namesTick: Flow<Int> get() = _namesTick
 
-    /** Remembered from UI surfaces that know the entity (list rows, session). */
     fun noteServerName(id: Long, name: String) = synchronized(sessions) {
         if (serverNames[id] != name) {
             serverNames[id] = name
@@ -38,32 +43,29 @@ object AppGraph {
         }
     }
 
-    /** Names of sessions that are running or trying to run. Used as the
-     *  notification text. */
     fun activeServerNames(): List<String> = synchronized(sessions) {
         sessions.filter { (_, s) -> s.state.value in ACTIVE_STATES }
             .map { (id, _) -> serverNames[id] ?: "Server $id" }
     }
 
-    /**
-     * True while at least one bot is connecting, connected, reconnecting or
-     * waiting for sign-in. This is the single liveness signal for the
-     * foreground service, the notification and the wake lock: when it is
-     * false nothing should be left running.
-     */
     fun hasActiveSessions(): Boolean = synchronized(sessions) {
         sessions.values.any { it.state.value in ACTIVE_STATES }
+    }
+
+    fun totalSessionBytes(): Long = synchronized(sessions) {
+        sessions.values.sumOf { it.sessionDataBytes.value }
     }
 
     lateinit var db: AfkDatabase
         private set
 
-    fun init(context: android.content.Context) {
+    fun init(context: Context) {
+        appContext = context.applicationContext
         if (!::db.isInitialized) db = AfkDatabase.get(context)
         EngineHost.init(context)
+        AlertNotifier.ensureChannel(context)
     }
 
-    /** Returns the shared ServerSession for a server (never starts a Node per server). */
     fun sessionFor(serverId: Long): ServerSession = synchronized(sessions) {
         sessions.getOrPut(serverId) {
             val session = ServerSession(context(), serverId)
@@ -73,6 +75,22 @@ object AppGraph {
             session
         }
     }
+
+    fun startServer(ctx: Context, server: ServerEntity): Boolean {
+        val cap = Prefs.maxBots(ctx)
+        if (cap > 0 && _activeCount.value >= cap) {
+            val existing = sessionFor(server.id)
+            if (existing.state.value !in ACTIVE_STATES) return false
+        }
+        noteServerName(server.id, server.name)
+        val session = sessionFor(server.id)
+        session.start(server)
+        ctx.startForegroundService(
+            Intent(ctx, AfkService::class.java).setAction(AfkService.ACTION_START),
+        )
+        return true
+    }
+
     fun removeSession(serverId: Long) {
         val session = synchronized(sessions) {
             sessions.remove(serverId)?.also { sessionJobs.remove(serverId)?.cancel() }
@@ -81,34 +99,36 @@ object AppGraph {
         recomputeActiveCount()
     }
 
-    /** Disconnects every session (each posts stop to the bridge and goes
-     *  disconnected). Used by the notification's force-stop action so no
-     *  session is left showing a stale Connected state. */
     fun stopAllSessions() {
         val all = synchronized(sessions) { sessions.values.toList() }
         all.forEach { it.stop() }
     }
 
-    /**
-     * A session starts being "active" when it leaves 'disconnected' (a start or
-     * reconnect was requested) and returns to idle once stopped/disconnected.
-     * 'error' is terminal (the bot is not connected and nothing retries), so it
-     * does not keep the service alive.
-     */
+    fun reconnectAllSessions() {
+        val active = synchronized(sessions) {
+            sessions.values.filter { it.state.value in ACTIVE_STATES }
+        }
+        active.forEach { it.reconnect() }
+    }
+
+    fun trimMemory() {
+        EngineHost.trimMemory()
+        val all = synchronized(sessions) { sessions.values.toList() }
+        all.forEach { it.trimMemory() }
+    }
+
     private fun recomputeActiveCount() {
         val n = synchronized(sessions) { sessions.values.count { it.state.value in ACTIVE_STATES } }
         _activeCount.value = n
-        // State transitions also change the notification's server-name list.
         _namesTick.value++
     }
 
-    private fun context(): android.content.Context =
+    private fun context(): Context =
         appContext ?: throw IllegalStateException("AppGraph not initialized with a context")
 
-    private var appContext: android.content.Context? = null
-        private set
+    private var appContext: Context? = null
 
-    fun setContext(ctx: android.content.Context) {
+    fun setContext(ctx: Context) {
         appContext = ctx.applicationContext
     }
 }

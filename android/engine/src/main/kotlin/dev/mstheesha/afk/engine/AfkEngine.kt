@@ -58,6 +58,7 @@ class AfkEngine(
             val channel: SocketChannel,
             val protocol: Int,
             val version: String,
+            val latencyMs: Int = -1,
         ) : Command
         data class ConnectFailed(val bot: BotSession, val message: String) : Command
         data class AuthJoined(
@@ -70,6 +71,8 @@ class AfkEngine(
         data class AuthCode(val bot: BotSession, val url: String, val code: String) : Command
         data class LogLine(val bot: BotSession, val line: String) : Command
         data class Stopped(val bot: BotSession) : Command
+        data class NetworkState(val available: Boolean) : Command
+        data object TrimMemory : Command
         data object Shutdown : Command
     }
 
@@ -80,6 +83,8 @@ class AfkEngine(
         val order: Long,
         val action: (BotSession) -> Unit,
     )
+
+    internal val scratch = EngineScratch()
 
     private val selector: Selector = Selector.open()
     private val commands = ConcurrentLinkedQueue<Command>()
@@ -93,6 +98,12 @@ class AfkEngine(
     private val authExecutor: ThreadPoolExecutor
     private var order = 0L
     private var lastPublish = 0L
+
+    @Volatile
+    private var uiVisible = true
+
+    @Volatile
+    private var networkAvailable = true
 
     @Volatile
     private var running = true
@@ -143,6 +154,52 @@ class AfkEngine(
 
     fun reconnect(id: Long) = post(Command.Reconnect(id))
 
+    /** When false, the engine sleeps until the next protocol timer instead of ticking 1 s UI stats. */
+    fun setUiVisible(visible: Boolean) {
+        val changed = uiVisible != visible
+        uiVisible = visible
+        if (changed && visible) selector.wakeup()
+    }
+
+    /** Pause reconnect attempts while offline and immediately resume when connectivity returns. */
+    fun setNetworkAvailable(available: Boolean) {
+        networkAvailable = available
+        post(Command.NetworkState(available))
+    }
+
+    /** Releases oversized shared compression and connection buffers on memory pressure. */
+    fun trimMemory() = post(Command.TrimMemory)
+
+    /**
+     * Standalone Microsoft device-code sign-in for adding an alt account in
+     * the Accounts UI without needing to connect to a server first.
+     */
+    fun signInAccount(
+        accountKey: String,
+        onCode: (url: String, code: String) -> Unit,
+        onResult: (Result<StoredTokens>) -> Unit,
+    ) {
+        try {
+            authExecutor.execute {
+                try {
+                    val auth = MicrosoftAuth(tokenStore, accountKey, onCode)
+                    auth.ensureAccessToken()
+                    val stored = tokenStore?.load(accountKey)
+                        ?: StoredTokens(
+                            accessToken = auth.accessToken,
+                            uuid = auth.profileUuid,
+                            name = auth.profileName,
+                        )
+                    onResult(Result.success(stored))
+                } catch (e: Exception) {
+                    onResult(Result.failure(e))
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            onResult(Result.failure(IllegalStateException("Auth pool is busy")))
+        }
+    }
+
     fun snapshot(id: Long): BotSnapshot? = snapshots[id]
 
     fun snapshots(): Map<Long, BotSnapshot> = HashMap(snapshots)
@@ -189,11 +246,16 @@ class AfkEngine(
                 drainCommands()
                 if (!running) break
                 val now = System.currentTimeMillis()
-                if (now - lastPublish >= 1_000) {
+                if (uiVisible && bots.isNotEmpty() && now - lastPublish >= 1_000) {
                     lastPublish = now
-                    for (bot in bots.values) bot.pushNow()
+                    for (bot in bots.values) bot.pushIfDirty()
                 }
-                selector.select(nextTimeout().toLong())
+                val timeout = nextTimeout()
+                if (timeout == 0L) {
+                    selector.select()
+                } else {
+                    selector.select(timeout)
+                }
                 val keys = selector.selectedKeys()
                 val iterator = keys.iterator()
                 while (iterator.hasNext()) {
@@ -275,6 +337,16 @@ class AfkEngine(
                 command.bot.key = null
                 listeners.remove(command.bot.id)
             }
+            is Command.NetworkState -> {
+                for (bot in bots.values) {
+                    bot.onNetworkState(command.available)
+                }
+            }
+            is Command.TrimMemory -> {
+                Compression.shrink()
+                scratch.shrink()
+                for (bot in bots.values) bot.shrinkBuffers()
+            }
             is Command.Shutdown -> running = false
         }
     }
@@ -315,7 +387,7 @@ class AfkEngine(
         try {
             val key = command.channel.register(selector, SelectionKey.OP_READ, bot)
             bot.key = key
-            bot.onConnected(command.channel, command.protocol, command.version)
+            bot.onConnected(command.channel, command.protocol, command.version, command.latencyMs)
             refreshInterest(bot)
         } catch (e: Exception) {
             try {
@@ -329,8 +401,9 @@ class AfkEngine(
     private fun readBot(bot: BotSession) {
         val connection = bot.conn ?: return
         var reads = 0
+        var frames = 0
         var eof = false
-        while (reads < 16) {
+        while (reads < 16 && frames < 512) {
             val read = connection.readFromChannel()
             if (read < 0) {
                 eof = true
@@ -338,16 +411,19 @@ class AfkEngine(
             }
             if (read == 0) break
             reads++
+            // Decode/skip immediately after each read so readBuf stays small
+            // (4 KiB) and oversized frames are discarded in-place.
+            while (frames < 512) {
+                val n = connection.processFrames(16)
+                frames += n
+                if (n < 16) break
+            }
+            if (bot.conn !== connection) return
         }
-        // Decode everything already buffered before acting on EOF: a final
-        // chat line or kick reason must not be dropped just because the peer
-        // closed right after sending it.
-        var frames = 0
-        while (frames < 512) {
+        // Drain any remaining complete frames already buffered before EOF.
+        while (frames < 512 && bot.conn === connection) {
             val n = connection.processFrames(16)
             frames += n
-            // Fewer than a full batch means the buffer is empty (or the bot
-            // paused for auth); nothing left to do until the next read.
             if (n < 16) break
         }
         if (eof) {
@@ -374,10 +450,23 @@ class AfkEngine(
         key.interestOps(SelectionKey.OP_READ or if (write) SelectionKey.OP_WRITE else 0)
     }
 
-    private fun nextTimeout(): Int {
+    /**
+     * Computes exact sleep duration until the next timer or UI stats tick.
+     * Returns `0L` (block indefinitely until socket activity or `wakeup()`)
+     * when idle with no pending timers and no visible UI ticker.
+     */
+    private fun nextTimeout(): Long {
+        if (!commands.isEmpty()) return 1L
         val now = System.currentTimeMillis()
-        val due = timers.peek()?.due ?: return 250
-        return (due - now).coerceIn(1L, 250L).toInt()
+        var wait = Long.MAX_VALUE
+        timers.peek()?.let { task ->
+            wait = minOf(wait, (task.due - now).coerceAtLeast(1L))
+        }
+        if (uiVisible && bots.isNotEmpty()) {
+            val nextPublish = (lastPublish + 1_000L - now).coerceAtLeast(1L)
+            wait = minOf(wait, nextPublish)
+        }
+        return if (wait == Long.MAX_VALUE) 0L else wait.coerceAtMost(60_000L)
     }
 
     private fun runTimers() {
@@ -407,6 +496,8 @@ class AfkEngine(
 
     // ------------------------------------------------------------------ internal API
 
+    internal val isNetworkAvailable: Boolean get() = networkAvailable
+
     internal fun publish(id: Long, snapshot: BotSnapshot) {
         snapshots[id] = snapshot
         val listener = listeners[id] ?: return
@@ -424,10 +515,10 @@ class AfkEngine(
 
     internal val prePlayTimeoutMs: Int get() = options.prePlayTimeoutMs
 
-    internal fun connect(bot: BotSession) {
+    internal fun connect(bot: BotSession, hostOverride: String? = null, portOverride: Int = 0) {
         if (!running || bots[bot.id] !== bot) return
         if (!bot.config.onlineMode) {
-            openSocket(bot)
+            openSocket(bot, hostOverride, portOverride)
             return
         }
         // Sign-in can block for minutes while waiting for a device code. Run it
@@ -446,26 +537,29 @@ class AfkEngine(
                     post(Command.AuthFailed(bot, e.message ?: "sign-in failed"))
                     return@execute
                 }
-                if (running && bots[bot.id] === bot) openSocket(bot)
+                if (running && bots[bot.id] === bot) openSocket(bot, hostOverride, portOverride)
             }
         } catch (e: RejectedExecutionException) {
             post(Command.ConnectFailed(bot, "Engine is busy"))
         }
     }
 
-    private fun openSocket(bot: BotSession) {
+    private fun openSocket(bot: BotSession, hostOverride: String?, portOverride: Int) {
         try {
-            executor.execute { connectNow(bot) }
+            executor.execute { connectNow(bot, hostOverride, portOverride) }
         } catch (e: RejectedExecutionException) {
             post(Command.ConnectFailed(bot, "Engine is busy"))
         }
     }
 
-    private fun connectNow(bot: BotSession) {
+    private fun connectNow(bot: BotSession, hostOverride: String?, portOverride: Int) {
         if (!running || bots[bot.id] !== bot) return
         try {
-            val target = HostPolicy.resolve(bot.config.host, bot.config.port)
+            val dialHost = hostOverride?.takeIf { it.isNotBlank() } ?: bot.config.host
+            val dialPort = if (portOverride in 1..65535) portOverride else bot.config.port
+            val target = HostPolicy.resolve(dialHost, dialPort)
             var pingVersion = ""
+            var latencyMs = -1
             var protocol = if (bot.config.protocolOverride > 0) {
                 bot.config.protocolOverride
             } else {
@@ -475,6 +569,7 @@ class AfkEngine(
                     null
                 }
                 pingVersion = ping?.versionName ?: ""
+                latencyMs = ping?.latencyMs ?: -1
                 ping?.protocol?.takeIf { it > 0 } ?: PacketTable.latest.protocol
             }
             if (PacketTable.forProtocol(protocol) == null) {
@@ -502,6 +597,7 @@ class AfkEngine(
             }
             val channel = SocketChannel.open()
             channel.configureBlocking(true)
+            val connectStart = System.nanoTime()
             try {
                 channel.socket().tcpNoDelay = true
                 channel.socket().keepAlive = true
@@ -516,8 +612,11 @@ class AfkEngine(
                 }
                 throw e
             }
+            if (latencyMs < 0) {
+                latencyMs = ((System.nanoTime() - connectStart) / 1_000_000L).toInt().coerceAtLeast(1)
+            }
             channel.configureBlocking(false)
-            post(Command.Connected(bot, channel, protocol, pingVersion))
+            post(Command.Connected(bot, channel, protocol, pingVersion, latencyMs))
         } catch (e: Exception) {
             post(Command.ConnectFailed(bot, e.message ?: e.javaClass.simpleName))
         }

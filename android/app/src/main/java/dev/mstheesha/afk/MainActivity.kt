@@ -13,43 +13,45 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -58,54 +60,54 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BatterySaver
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DataUsage
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -113,6 +115,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -121,32 +124,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import dev.mstheesha.afk.engine.VersionCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -157,12 +158,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         AppGraph.uiVisible = false
-        // Closing the UI with zero bots must not leave a service/notification
-        // behind. Bots that are running (or reconnecting) keep it alive.
         if (!AppGraph.hasActiveSessions()) {
             stopService(Intent(this, AfkService::class.java))
         }
         super.onStop()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            AppGraph.trimMemory()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -170,19 +176,26 @@ class MainActivity : ComponentActivity() {
         AppGraph.init(applicationContext)
         AppGraph.setContext(applicationContext)
         requestNotificationPermission()
-        // Target SDK 35+ enforces edge-to-edge: adjustResize no longer moves
-        // content, so the keyboard would cover the chat input. Opt in here
-        // and handle the IME inset in Compose (single imePadding, SessionScreen).
         enableEdgeToEdge()
         setContent {
             val systemDark = isSystemInDarkTheme()
-            var dark by rememberSaveable { mutableStateOf(Prefs.isDark(this, systemDark)) }
-            MaterialTheme(colorScheme = if (dark) GreenDark else GreenLight) {
+            var themeModeKey by rememberSaveable { mutableStateOf(Prefs.themeMode(this).key) }
+            var dynamicColor by rememberSaveable { mutableStateOf(Prefs.dynamicColor(this)) }
+            val themeMode = ThemeMode.of(themeModeKey)
+            val (colorScheme, isDark) = resolveColorScheme(this, themeMode, systemDark, dynamicColor)
+
+            MaterialTheme(colorScheme = colorScheme) {
                 AfkApp(
-                    dark = dark,
-                    onToggleDark = { v ->
-                        dark = v
-                        Prefs.setDark(this, v)
+                    themeMode = themeMode,
+                    dynamicColor = dynamicColor,
+                    isDark = isDark,
+                    onThemeMode = { m ->
+                        themeModeKey = m.key
+                        Prefs.setThemeMode(this, m)
+                    },
+                    onDynamicColor = { enabled ->
+                        dynamicColor = enabled
+                        Prefs.setDynamicColor(this, enabled)
                     },
                 )
             }
@@ -199,10 +212,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * Battery-optimization exemption, requested only when the user taps the drawer
- * item. Prompting on every launch is hostile and easy to get wrong on OEM ROMs.
- */
 private fun requestIgnoreBatteryOptimizations(context: Context) {
     val pm = context.getSystemService(PowerManager::class.java)
     if (pm.isIgnoringBatteryOptimizations(context.packageName)) return
@@ -214,7 +223,6 @@ private fun requestIgnoreBatteryOptimizations(context: Context) {
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     } catch (_: Exception) {
-        // Some OEM builds drop the direct request; open the settings list.
         try {
             context.startActivity(
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
@@ -225,27 +233,24 @@ private fun requestIgnoreBatteryOptimizations(context: Context) {
     }
 }
 
-private val GreenLight = lightColorScheme(
-    primary = Color(0xFF2E7D32),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFB7EFB0),
-    secondary = Color(0xFF43A047),
-    tertiary = Color(0xFF66BB6A),
-)
-private val GreenDark = darkColorScheme(
-    primary = Color(0xFF81C784),
-    onPrimary = Color(0xFF003300),
-    primaryContainer = Color(0xFF005300),
-    secondary = Color(0xFFA5D6A7),
-    tertiary = Color(0xFF66BB6A),
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
-    // Real selection state so the session screen reacts to the chosen server
-    // (rememberSaveable survives rotation/process recreation).
+private fun AfkApp(
+    themeMode: ThemeMode,
+    dynamicColor: Boolean,
+    isDark: Boolean,
+    onThemeMode: (ThemeMode) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val dao = AppGraph.db.serverDao()
+    val servers by dao.all().collectAsState(initial = emptyList())
+    val activeCount by AppGraph.activeCount.collectAsState(initial = 0)
+
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showAccountsSheet by remember { mutableStateOf(false) }
+    var showAppSettingsSheet by remember { mutableStateOf(false) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -255,7 +260,6 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
         scope.launch { drawerState.close() }
     }
 
-    // Back returns from session to server list instead of exiting
     BackHandler(enabled = selectedId != null) {
         selectedId = null
     }
@@ -264,32 +268,68 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
         drawerState = drawerState,
         drawerContent = {
             DrawerContent(
-                dark = dark,
+                servers = servers,
+                activeCount = activeCount,
                 selectedId = selectedId,
-                onToggleDark = onToggleDark,
-                onSelectServer = { id -> openServer(id) },
                 drawerOpen = drawerState.isOpen,
+                onSelectServer = { id -> openServer(id) },
+                onOpenAccounts = {
+                    scope.launch { drawerState.close() }
+                    showAccountsSheet = true
+                },
+                onOpenAppSettings = {
+                    scope.launch { drawerState.close() }
+                    showAppSettingsSheet = true
+                },
             )
         },
     ) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Java AFK") },
-                    actions = {
-                        if (selectedId == null) {
+                    navigationIcon = {
+                        if (selectedId != null) {
+                            IconButton(onClick = { selectedId = null }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        } else {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                 Icon(Icons.Default.Menu, contentDescription = "Menu")
                             }
-                        } else {
-                            IconButton(
-                                onClick = { selectedId = null },
-                                // Center-align with the server settings gear
-                                // below: TopAppBar actions end 4 dp from the
-                                // edge, the gear ends 16+16 dp in.
-                                modifier = Modifier.padding(end = 28.dp),
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    title = {
+                        val currentName = selectedId?.let { id -> servers.firstOrNull { it.id == id }?.name }
+                        Text(
+                            currentName ?: "Java AFK",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    actions = {
+                        if (selectedId == null && servers.isNotEmpty()) {
+                            if (activeCount > 0) {
+                                TextButton(onClick = { AppGraph.stopAllSessions() }) {
+                                    Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Stop all")
+                                }
+                            } else {
+                                TextButton(onClick = {
+                                    var started = 0
+                                    for (s in servers) {
+                                        if (AppGraph.startServer(ctx, s)) started++ else break
+                                    }
+                                    if (started < servers.size) {
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("Reached max concurrent bots limit ($started started)")
+                                        }
+                                    }
+                                }) {
+                                    Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Start all")
+                                }
                             }
                         }
                     },
@@ -300,94 +340,153 @@ private fun AfkApp(dark: Boolean, onToggleDark: (Boolean) -> Unit) {
             Box(Modifier.padding(padding)) {
                 val id = selectedId
                 if (id == null) {
-                    ServerListScreen(onSelect = { serverId -> openServer(serverId) })
+                    ServerListScreen(
+                        servers = servers,
+                        snackbarHostState = snackbarHostState,
+                        onSelect = { serverId -> openServer(serverId) },
+                    )
                 } else {
                     SessionScreen(
                         serverId = id,
+                        isDark = isDark,
                         snackbarHostState = snackbarHostState,
+                        onOpenAccounts = { showAccountsSheet = true },
                     )
                 }
             }
         }
     }
+
+    if (showAccountsSheet) {
+        AccountsSheet(onDismiss = { showAccountsSheet = false })
+    }
+
+    if (showAppSettingsSheet) {
+        AppSettingsSheet(
+            themeMode = themeMode,
+            dynamicColor = dynamicColor,
+            onThemeMode = onThemeMode,
+            onDynamicColor = onDynamicColor,
+            onDismiss = { showAppSettingsSheet = false },
+        )
+    }
 }
 
 @Composable
 private fun DrawerContent(
-    dark: Boolean,
+    servers: List<ServerEntity>,
+    activeCount: Int,
     selectedId: Long?,
-    onToggleDark: (Boolean) -> Unit,
-    onSelectServer: (Long) -> Unit,
     drawerOpen: Boolean,
+    onSelectServer: (Long) -> Unit,
+    onOpenAccounts: () -> Unit,
+    onOpenAppSettings: () -> Unit,
 ) {
-    val dao = AppGraph.db.serverDao()
-    val servers by dao.all().collectAsState(initial = emptyList())
-    val activeCount by AppGraph.activeCount.collectAsState(initial = 0)
     val context = LocalContext.current
+    val maxCap = Prefs.maxBots(context)
+    val countLabel = if (maxCap > 0) "$activeCount/$maxCap" else "$activeCount running"
 
     ModalDrawerSheet(
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxHeight(),
     ) {
         Text(
-            "Java AFK",
+            "Java AFK NaNo",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp),
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
-        // Running count in front of the "Servers" header (fraction only).
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         ) {
-            Text(
-                "$activeCount/${EngineHost.MAX_BOTS}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
             Text(
                 "Servers",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        if (servers.isEmpty()) {
-            Text(
-                "No servers.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        } else {
-            servers.forEach { server ->
-                NavigationDrawerItem(
-                    icon = {
-                        ServerAvatar(
-                            host = server.host,
-                            port = server.port,
-                            name = server.name,
-                            size = 32.dp,
-                        )
-                    },
-                    label = { Text(server.name) },
-                    selected = false,
-                    onClick = { onSelectServer(server.id) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Text(
+                    countLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 )
             }
         }
 
-        // Push everything below (usage, theme, version) to the bottom so the
-        // server list owns the top of the drawer.
-        Spacer(Modifier.weight(1f))
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (servers.isEmpty()) {
+                Text(
+                    "No servers yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            } else {
+                servers.forEach { server ->
+                    val session = remember(server.id) { AppGraph.sessionFor(server.id) }
+                    val st by session.state.collectAsState()
+                    val dotColor = when (st) {
+                        "connected" -> MaterialTheme.colorScheme.primary
+                        "connecting", "reconnecting", "authenticating" -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.outlineVariant
+                    }
+                    NavigationDrawerItem(
+                        icon = {
+                            ServerAvatar(
+                                host = server.host,
+                                port = server.port,
+                                name = server.name,
+                                size = 30.dp,
+                            )
+                        },
+                        label = { Text(server.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        badge = {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor),
+                            )
+                        },
+                        selected = selectedId == server.id,
+                        onClick = { onSelectServer(server.id) },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                    )
+                }
+            }
+        }
 
-        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
 
         ResourcesPanel(active = drawerOpen)
 
-        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
 
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.ManageAccounts, contentDescription = null) },
+            label = { Text("Microsoft accounts") },
+            selected = false,
+            onClick = onOpenAccounts,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+            label = { Text("App settings") },
+            selected = false,
+            onClick = onOpenAppSettings,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
         NavigationDrawerItem(
             icon = { Icon(Icons.Default.BatterySaver, contentDescription = null) },
             label = { Text("Battery optimization") },
@@ -396,34 +495,12 @@ private fun DrawerContent(
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
 
-        NavigationDrawerItem(
-            icon = {
-                AnimatedContent(targetState = dark, label = "theme_icon") { isDark ->
-                    Icon(
-                        if (isDark) Icons.Default.DarkMode else Icons.Default.LightMode,
-                        contentDescription = null,
-                    )
-                }
-            },
-            label = { Text("Dark mode") },
-            selected = dark,
-            onClick = { onToggleDark(!dark) },
-            badge = {
-                Switch(
-                    checked = dark,
-                    onCheckedChange = null,
-                    modifier = Modifier.graphicsLayer { scaleX = 0.7f; scaleY = 0.7f },
-                )
-            },
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-        )
-
         Text(
-            "Java AFK v${BuildConfig.VERSION_NAME}",
+            "Java AFK NaNo v${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars),
         )
     }
@@ -437,12 +514,10 @@ private fun ResourcesPanel(active: Boolean) {
     LaunchedEffect(active) {
         while (active) {
             stats = withContext(Dispatchers.IO) { ResourceMonitor.sample(app) }
-            delay(5000)
+            delay(4000)
         }
     }
 
-    // Raw per-window CPU is bursty (GC, render, Node); smooth it so the
-    // number doesn't jump between extremes every refresh.
     var smoothCpu by remember { mutableStateOf(0f) }
     LaunchedEffect(stats) {
         stats?.let {
@@ -465,49 +540,32 @@ private fun ResourcesPanel(active: Boolean) {
             "App usage",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
+            modifier = Modifier.padding(bottom = 6.dp),
         )
-
-        Column(Modifier.padding(vertical = 4.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Default.Speed,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "CPU: %.0f%%".format(smoothCpu),
-                    style = MaterialTheme.typography.bodyMedium,
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Default.Speed, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("CPU %.0f%%".format(smoothCpu), style = MaterialTheme.typography.labelMedium)
+                }
+                LinearProgressIndicator(
+                    progress = { cpuAnim },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 )
             }
-            LinearProgressIndicator(
-                progress = { cpuAnim },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            )
-        }
-
-        Column(Modifier.padding(vertical = 4.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Default.Memory,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "RAM: $ram MB",
-                    style = MaterialTheme.typography.bodyMedium,
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Default.Memory, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("RAM $ram MB", style = MaterialTheme.typography.labelMedium)
+                }
+                LinearProgressIndicator(
+                    progress = { ramAnim },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 )
             }
-            LinearProgressIndicator(
-                progress = { ramAnim },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            )
         }
     }
 }
@@ -525,10 +583,13 @@ private fun formatBytes(bytes: Long): String {
 }
 
 @Composable
-private fun ServerListScreen(onSelect: (Long) -> Unit) {
+private fun ServerListScreen(
+    servers: List<ServerEntity>,
+    snackbarHostState: SnackbarHostState,
+    onSelect: (Long) -> Unit,
+) {
     val ctx = LocalContext.current
     val dao = AppGraph.db.serverDao()
-    val servers by dao.all().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<ServerEntity?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -542,17 +603,37 @@ private fun ServerListScreen(onSelect: (Long) -> Unit) {
     ) { padding ->
         if (servers.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No servers yet. Tap + to add one.", style = MaterialTheme.typography.bodyLarge)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("No servers yet", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Tap + to add your first Minecraft Java server.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else {
             LazyColumn(
                 Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(servers, key = { it.id }) { server ->
                     ServerRow(
                         server = server,
                         onSelect = onSelect,
+                        onQuickToggle = { start ->
+                            if (start) {
+                                if (!AppGraph.startServer(ctx, server)) {
+                                    val cap = Prefs.maxBots(ctx)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Maximum $cap bots running (adjust in App settings)")
+                                    }
+                                }
+                            } else {
+                                AppGraph.sessionFor(server.id).stop()
+                            }
+                        },
                         onEdit = { editing = server },
                         onDelete = {
                             AppGraph.removeSession(server.id)
@@ -578,15 +659,11 @@ private fun ServerListScreen(onSelect: (Long) -> Unit) {
                 scope.launch {
                     dao.insert(
                         ServerEntity(
-                            name = draft.value.name.trim().ifEmpty { draft.value.host },
+                            name = draft.value.name.trim().ifEmpty { draft.value.host.trim() },
                             host = draft.value.host.trim(),
                             port = draft.value.portInt,
-                            chatCommand = draft.value.chatCommand.trim(),
-                            commandDelaySeconds = draft.value.delayInt,
                             onlineMode = draft.value.onlineMode,
                             username = draft.value.username.trim(),
-                            viewDistance = draft.value.viewDistanceInt,
-                            chatMode = draft.value.chatMode,
                         ),
                     )
                     showAdd = false
@@ -607,15 +684,11 @@ private fun ServerListScreen(onSelect: (Long) -> Unit) {
                 scope.launch {
                     dao.update(
                         server.copy(
-                            name = ed.value.name.trim().ifEmpty { ed.value.host },
+                            name = ed.value.name.trim().ifEmpty { ed.value.host.trim() },
                             host = ed.value.host.trim(),
                             port = ed.value.portInt,
-                            chatCommand = ed.value.chatCommand.trim(),
-                            commandDelaySeconds = ed.value.delayInt,
                             onlineMode = ed.value.onlineMode,
                             username = ed.value.username.trim(),
-                            viewDistance = ed.value.viewDistanceInt,
-                            chatMode = ed.value.chatMode,
                         ),
                     )
                     editing = null
@@ -636,54 +709,62 @@ private fun cacheFavicon(key: String, bmp: android.graphics.Bitmap) {
 private fun ServerRow(
     server: ServerEntity,
     onSelect: (Long) -> Unit,
+    onQuickToggle: (start: Boolean) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val session = remember(server.id) { AppGraph.sessionFor(server.id) }
-    // Feed the foreground notification's server-name list.
     LaunchedEffect(server.id, server.name) {
         AppGraph.noteServerName(server.id, server.name)
     }
     val state by session.state.collectAsState()
+    val health by session.health.collectAsState()
+    val dataBytes by session.sessionDataBytes.collectAsState()
     var showMenu by remember { mutableStateOf(false) }
 
     val isConnected = state == "connected"
     val isWorking = state == "connecting" || state == "authenticating" || state == "reconnecting"
+    val isActive = isConnected || isWorking
     val statusLabel = when {
         isConnected -> "Connected"
         isWorking -> state.replaceFirstChar { it.uppercase() }
         else -> "Offline"
     }
-    val statusColor =
-        if (isConnected) MaterialTheme.colorScheme.primary
-        else if (isWorking) MaterialTheme.colorScheme.tertiary
-        else MaterialTheme.colorScheme.onSurfaceVariant
+    val statusColor = when {
+        isConnected -> MaterialTheme.colorScheme.primary
+        isWorking -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         onClick = { onSelect(server.id) },
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ServerAvatar(
                 host = server.host,
                 port = server.port,
                 name = server.name,
-                size = 48.dp,
+                size = 46.dp,
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
 
             Column(
                 Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(server.name, style = MaterialTheme.typography.titleMedium)
-                // Host with the status pill right next to it.
+                Text(
+                    server.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         server.host,
@@ -695,14 +776,43 @@ private fun ServerRow(
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(statusColor.copy(alpha = 0.15f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        contentAlignment = Alignment.Center,
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
-                        Text(statusLabel, style = MaterialTheme.typography.labelMedium, color = statusColor)
+                        Text(statusLabel, style = MaterialTheme.typography.labelSmall, color = statusColor)
                     }
                 }
+                if (isConnected) {
+                    val hearts = String.format(Locale.US, "%.0f", (health / 2f).coerceAtLeast(0f))
+                    Text(
+                        "♥ $hearts/10 · ${formatBytes(dataBytes)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+
+            // One-tap Start / Stop directly on the server card.
+            FilledTonalIconButton(
+                onClick = { onQuickToggle(!isActive) },
+                colors = if (isActive) {
+                    IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                } else {
+                    IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                },
+            ) {
+                Icon(
+                    if (isActive) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = if (isActive) "Stop" else "Start",
+                )
             }
 
             Box {
@@ -735,10 +845,9 @@ private fun ServerRow(
     }
 }
 
-/** Server icon shared by the main list and the drawer: live favicon when the
- *  server has one, initial-letter tile otherwise (memory-cached). */
 @Composable
 private fun ServerAvatar(host: String, port: Int, name: String, size: Dp) {
+    val ctx = LocalContext.current
     val cacheKey = "$host:$port"
     var favicon by remember(cacheKey) {
         mutableStateOf(faviconCache[cacheKey])
@@ -749,7 +858,7 @@ private fun ServerAvatar(host: String, port: Int, name: String, size: Dp) {
             favicon = faviconCache[cacheKey]
         } else {
             val bmp = withContext(Dispatchers.IO) {
-                ServerPinger.fetchFavicon(host, port)
+                ServerPinger.fetchFavicon(ctx, host, port)
             }
             if (bmp != null) cacheFavicon(cacheKey, bmp)
             favicon = bmp
@@ -785,16 +894,10 @@ private data class ServerDraft(
     val name: String = "",
     val host: String = "",
     val port: String = "25565",
-    val chatCommand: String = "",
-    val commandDelaySeconds: String = "5",
     val onlineMode: Boolean = false,
     val username: String = "",
-    val viewDistance: String = "2",
-    val chatMode: String = "enabled", // enabled | commandsOnly | hidden
 ) {
     val portInt: Int get() = port.toIntOrNull()?.coerceIn(1, 65535) ?: 25565
-    val delayInt: Int get() = commandDelaySeconds.toIntOrNull()?.coerceIn(0, 3600) ?: 5
-    val viewDistanceInt: Int get() = viewDistance.toIntOrNull()?.coerceIn(2, 12) ?: 2
     val portValid: Boolean get() = port.toIntOrNull()?.let { it in 1..65535 } ?: false
 
     companion object {
@@ -802,26 +905,8 @@ private data class ServerDraft(
             name = s.name,
             host = s.host,
             port = s.port.toString(),
-            chatCommand = s.chatCommand,
-            commandDelaySeconds = s.commandDelaySeconds.toString(),
             onlineMode = s.onlineMode,
             username = s.username,
-            viewDistance = s.viewDistance.toString(),
-            chatMode = s.chatMode,
-        )
-    }
-}
-
-@Composable
-private fun ChatModeChip(label: String, value: String, current: String, onClick: () -> Unit) {
-    val selected = current == value
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-    ) {
-        Text(
-            label,
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -839,8 +924,30 @@ private fun ServerDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(draft.name, { onChange(draft.copy(name = it)) }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(draft.host, { onChange(draft.copy(host = it)) }, label = { Text("Host") }, singleLine = true)
+                OutlinedTextField(
+                    draft.name,
+                    { onChange(draft.copy(name = it)) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    draft.host,
+                    { raw ->
+                        // Auto-split "play.example.com:25566" on paste.
+                        val colon = raw.lastIndexOf(':')
+                        if (colon > 0 && raw.indexOf(':') == colon) {
+                            val h = raw.substring(0, colon)
+                            val p = raw.substring(colon + 1)
+                            if (p.all(Char::isDigit) && p.isNotEmpty()) {
+                                onChange(draft.copy(host = h, port = p))
+                                return@OutlinedTextField
+                            }
+                        }
+                        onChange(draft.copy(host = raw))
+                    },
+                    label = { Text("Host (or host:port)") },
+                    singleLine = true,
+                )
                 OutlinedTextField(
                     draft.port,
                     { onChange(draft.copy(port = it)) },
@@ -848,14 +955,16 @@ private fun ServerDialog(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = !draft.portValid,
-                    supportingText = if (!draft.portValid) { { Text("Port must be 1–65535") } } else null,
+                    supportingText = if (!draft.portValid) {
+                        { Text("Port must be 1–65535") }
+                    } else null,
                 )
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("Microsoft account (online mode)")
+                    Text("Microsoft account (online)")
                     Switch(checked = draft.onlineMode, onCheckedChange = { onChange(draft.copy(onlineMode = it)) })
                 }
                 if (!draft.onlineMode) {
@@ -876,352 +985,51 @@ private fun ServerDialog(
     )
 }
 
-// Per-server settings, moved off the main session screen. Edits auto-save
-// to the database with the same debounce as the old inline fields.
-private suspend fun updateServerField(
-    dao: ServerDao,
-    id: Long,
-    transform: (ServerEntity) -> ServerEntity,
-) {
-    // Read the row again instead of writing the composable's snapshot: two
-    // fields changing inside the same debounce window would otherwise clobber
-    // each other with an old copy.
-    val current = dao.get(id) ?: return
-    val updated = transform(current)
-    if (updated != current) dao.update(updated)
-}
-
-@Composable
-@OptIn(ExperimentalLayoutApi::class)
-private fun ServerSettingsDialog(
-    server: ServerEntity,
-    session: ServerSession,
-    snackbarHostState: SnackbarHostState,
-    onDismiss: () -> Unit,
-) {
-    val dao = AppGraph.db.serverDao()
-    val scope = rememberCoroutineScope()
-    var chatCommandText by remember(server.id) { mutableStateOf(server.chatCommand) }
-    var delayText by remember(server.id) { mutableStateOf(server.commandDelaySeconds.toString()) }
-    var viewDistanceText by remember(server.id) { mutableStateOf(server.viewDistance.toString()) }
-    var chatModeValue by remember(server.id) { mutableStateOf(server.chatMode) }
-    var autoJumpValue by remember(server.id) { mutableStateOf(server.autoJump) }
-    var loopCommandValue by remember(server.id) { mutableStateOf(server.loopCommand) }
-    // 0 = auto-detect. An unknown/legacy protocol is displayed as auto-detect
-    // but is only overwritten in the DB once the user picks a version.
-    var protocolValue by remember(server.id) {
-        mutableStateOf(
-            if (server.protocolOverride == 0 || VersionCatalog.nameOf(server.protocolOverride) != null) {
-                server.protocolOverride
-            } else {
-                0
-            },
-        )
-    }
-    var protocolPicked by remember(server.id) { mutableStateOf(false) }
-    var protocolMenuOpen by remember(server.id) { mutableStateOf(false) }
-    fun pushLive() = session.pushLiveConfig(
-        chatCommandText,
-        delayText.toIntOrNull() ?: server.commandDelaySeconds,
-        viewDistanceText.toIntOrNull() ?: server.viewDistance,
-        chatModeValue,
-        autoJumpValue,
-        loopCommandValue,
-    )
-    LaunchedEffect(chatCommandText) {
-        if (chatCommandText != server.chatCommand) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(chatCommand = chatCommandText) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(delayText) {
-        val parsed = delayText.toIntOrNull()
-        if (parsed != null && parsed != server.commandDelaySeconds) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(commandDelaySeconds = parsed) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(viewDistanceText) {
-        val parsed = viewDistanceText.toIntOrNull()?.coerceIn(2, 12)
-        if (parsed != null && parsed != server.viewDistance) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(viewDistance = parsed) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(chatModeValue) {
-        if (chatModeValue != server.chatMode) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(chatMode = chatModeValue) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(autoJumpValue) {
-        if (autoJumpValue != server.autoJump) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(autoJump = autoJumpValue) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(loopCommandValue) {
-        if (loopCommandValue != server.loopCommand) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(loopCommand = loopCommandValue) }
-            pushLive()
-        }
-    }
-    LaunchedEffect(protocolValue, protocolPicked) {
-        if (protocolPicked && protocolValue != server.protocolOverride) {
-            delay(600)
-            updateServerField(dao, server.id) { it.copy(protocolOverride = protocolValue) }
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("${server.name} settings") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-            ) {
-                SettingsSection("Connection") {
-                    // Friendly version picker instead of a raw protocol number.
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("Version", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Auto-detect uses Server List Ping. Pick a version only if the server rejects the detected one. Applies on the next Start.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Box {
-                            OutlinedButton(onClick = { protocolMenuOpen = true }) {
-                                Text(
-                                    VersionCatalog.nameOf(protocolValue)?.let { "$it ($protocolValue)" }
-                                        ?: "Auto-detect",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = protocolMenuOpen,
-                                onDismissRequest = { protocolMenuOpen = false },
-                            ) {
-                                Column(
-                                    Modifier
-                                        .heightIn(max = 360.dp)
-                                        .verticalScroll(rememberScrollState()),
-                                ) {
-                                    VersionMenuItem("Auto-detect (recommended)", protocolValue == 0) {
-                                        protocolPicked = true
-                                        protocolValue = 0
-                                        protocolMenuOpen = false
-                                    }
-                                    VersionCatalog.releases.asReversed().forEach { release ->
-                                        VersionMenuItem(
-                                            "${release.name} (${release.protocol})",
-                                            protocolValue == release.protocol,
-                                        ) {
-                                            protocolPicked = true
-                                            protocolValue = release.protocol
-                                            protocolMenuOpen = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("View distance", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Chunks loaded from the server (2–12). Lower saves battery and data; 2 is enough for AFK.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        OutlinedTextField(
-                            value = viewDistanceText,
-                            onValueChange = { viewDistanceText = it },
-                            label = { Text("Chunks") },
-                            singleLine = true,
-                            modifier = Modifier.width(110.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        )
-                    }
-                }
-                HorizontalDivider()
-                SettingsSection("Chat") {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Public chat", style = MaterialTheme.typography.bodyLarge)
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            ChatModeChip("Enabled", "enabled", chatModeValue) { chatModeValue = "enabled" }
-                            ChatModeChip("Commands only", "commandsOnly", chatModeValue) { chatModeValue = "commandsOnly" }
-                            ChatModeChip("Messages only", "messagesOnly", chatModeValue) { chatModeValue = "messagesOnly" }
-                            ChatModeChip("Hidden", "hidden", chatModeValue) { chatModeValue = "hidden" }
-                        }
-                        Text(
-                            "What the server sends you. Commands only hides player chat; Messages only hides join/leave/system lines. Send always works.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                HorizontalDivider()
-                SettingsSection("Commands") {
-                    OutlinedTextField(
-                        value = chatCommandText,
-                        onValueChange = { chatCommandText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Command sent after spawning") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = delayText,
-                        onValueChange = { delayText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Delay before command (seconds)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Repeat command", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Send the command again every delay instead of once.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = loopCommandValue,
-                            onCheckedChange = { loopCommandValue = it },
-                        )
-                    }
-                }
-                HorizontalDivider()
-                SettingsSection("Automation") {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Auto-jump", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "Jump every 25–40 s so anti-AFK plugins see movement.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = autoJumpValue,
-                            onCheckedChange = { autoJumpValue = it },
-                        )
-                    }
-                }
-                HorizontalDivider()
-                SettingsSection("Account") {
-                    OutlinedButton(onClick = {
-                        session.clearToken()
-                        scope.launch { snackbarHostState.showSnackbar("Saved login token cleared") }
-                    }) {
-                        Icon(Icons.Default.Close, contentDescription = null)
-                        Text(" Clear token")
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-    )
-}
-
-@Composable
-private fun SettingsSection(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        content()
-    }
-}
-
-@Composable
-private fun VersionMenuItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                label,
-                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-        },
-        onClick = onClick,
-        trailingIcon = if (selected) {
-            { Icon(Icons.Default.Check, contentDescription = null) }
-        } else {
-            null
-        },
-    )
-}
-
 @Composable
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 private fun SessionScreen(
     serverId: Long,
+    isDark: Boolean,
     snackbarHostState: SnackbarHostState,
+    onOpenAccounts: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val dao = AppGraph.db.serverDao()
     val session = remember(serverId) { AppGraph.sessionFor(serverId) }
 
     val server by dao.byId(serverId).collectAsState(initial = null)
-
     val state by session.state.collectAsState()
     val detail by session.detail.collectAsState()
     val logs by session.logs.collectAsState()
     val chat by session.chat.collectAsState()
     val authRequired by session.authRequired.collectAsState()
-    val activeCount by AppGraph.activeCount.collectAsState(initial = 0)
-    var kickedCount by remember { mutableIntStateOf(0) }
-    var chatInput by remember { mutableStateOf("") }
-    var showChat by remember { mutableStateOf(false) }
-    var showSettings by remember(serverId) { mutableStateOf(false) }
-    // Session-owned counters: keep ticking while connected even when this
-    // screen is closed and reopened.
+    val health by session.health.collectAsState()
+    val food by session.food.collectAsState()
+    val pingMs by session.pingMs.collectAsState()
+    val versionName by session.versionName.collectAsState()
+
     val afkSeconds by session.afkSeconds.collectAsState()
     val sessionData by session.sessionDataBytes.collectAsState()
     val bytesIn by session.bytesIn.collectAsState()
     val bytesOut by session.bytesOut.collectAsState()
+
+    var kickedCount by remember { mutableIntStateOf(session.kickedCount) }
+    var chatInput by remember { mutableStateOf("") }
+    var showChat by remember { mutableStateOf(false) }
+    var showSettings by remember(serverId) { mutableStateOf(false) }
+    val recentSent = remember(serverId) { mutableStateListOf<String>() }
+    val showTimestamps = Prefs.chatTimestamps(ctx)
+    val quickCommands = remember(showSettings) { Prefs.quickCommands(ctx) }
+    val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+
     val scope = rememberCoroutineScope()
     val canStart = state == "disconnected" || state == "error"
 
-    // Single send path for the keyboard Send key and the arrow button:
-    // trim, ignore blank, clear after sending, keep focus/keyboard open.
-    // Never fails silently: while Disconnected both show "Not connected".
     val chatFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-    fun sendChatMessage() {
-        val msg = chatInput.trim()
+
+    fun sendText(raw: String) {
+        val msg = raw.trim()
         if (msg.isBlank()) return
         if (state != "connected") {
             scope.launch { snackbarHostState.showSnackbar("Not connected") }
@@ -1230,13 +1038,20 @@ private fun SessionScreen(
         session.sendChat(msg) { err ->
             scope.launch { snackbarHostState.showSnackbar(err) }
         }
+        recentSent.remove(msg)
+        recentSent.add(0, msg)
+        if (recentSent.size > 6) recentSent.removeAt(recentSent.lastIndex)
+    }
+
+    fun sendChatMessage() {
+        val msg = chatInput.trim()
+        if (msg.isBlank()) return
+        sendText(msg)
         chatInput = ""
         chatFocusRequester.requestFocus()
         keyboardController?.show()
     }
 
-    // Follow-newest log/chat: sticks to the tail on new lines, releases when
-    // the user scrolls up, re-engages at the bottom or via the jump button.
     val listState = rememberLazyListState()
     var followNewest by remember { mutableStateOf(true) }
     LaunchedEffect(showChat) { followNewest = true }
@@ -1257,8 +1072,6 @@ private fun SessionScreen(
     LaunchedEffect(atBottom) {
         if (atBottom) followNewest = true
     }
-    // Keyboard opened: jump to the newest message so it stays visible above
-    // the keyboard. Visibility only — no keyboard height is tracked anywhere.
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {
         if (imeVisible && showChat && itemCount > 0) {
@@ -1267,19 +1080,8 @@ private fun SessionScreen(
         }
     }
 
-    // Chat is pulled in the session poll loop even with the tab closed; this
-    // just tops it up the moment the tab opens.
-    LaunchedEffect(showChat) {
-        session.setChatPolling(showChat)
-        if (showChat) {
-            // Ensure server chat already ingested is shown, even if status poll is idle.
-            session.refreshChatNow()
-        }
-    }
-
-    // 1 s counter ticker, alive only while this screen is composed (the
-    // session itself runs no background ticker anymore).
     LaunchedEffect(serverId) {
+        session.flushBuffersIfDirty()
         while (true) {
             delay(1000)
             session.refreshCounters()
@@ -1303,184 +1105,216 @@ private fun SessionScreen(
             Text("Select a server from the list first.")
         } else {
             val srv = server!!
-
             LaunchedEffect(srv.id, srv.name) {
                 AppGraph.noteServerName(srv.id, srv.name)
             }
 
-            val statusDotColor =
-                if (state == "connected") MaterialTheme.colorScheme.primary
-                else if (state == "connecting" || state == "authenticating" || state == "reconnecting") MaterialTheme.colorScheme.tertiary
-                else MaterialTheme.colorScheme.onSurfaceVariant
-            // Header + buttons wrap their content and scroll if the window
-            // gets short. The log/chat panel below owns weight(1f) plus the
-            // single imePadding, so the input can never be pushed off-screen.
+            val statusDotColor = when (state) {
+                "connected" -> MaterialTheme.colorScheme.primary
+                "connecting", "authenticating", "reconnecting" -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+
             Column(
                 Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-            Card(Modifier.fillMaxWidth().animateContentSize()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                Card(Modifier.fillMaxWidth().animateContentSize()) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(Modifier.fillMaxWidth()) {
+                            Column(
+                                Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(statusDotColor),
+                                    )
+                                    Text(
+                                        stateLabel(state),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                if (detail.isNotBlank()) {
+                                    Text(
+                                        detail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp),
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { showSettings = true },
+                                modifier = Modifier.align(Alignment.TopEnd),
+                            ) {
+                                Icon(Icons.Default.Settings, contentDescription = "Server settings")
+                            }
+                        }
+
+                        // Compact live vitals + ping + version pills when connected
+                        AnimatedVisibility(visible = state == "connected") {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                val heartsStr = String.format(Locale.US, "%.1f", (health / 2f).coerceAtLeast(0f))
+                                    .removeSuffix(".0")
+                                VitalsPill(
+                                    icon = Icons.Default.Favorite,
+                                    text = "$heartsStr/10",
+                                    tint = if (health <= 6f) MaterialTheme.colorScheme.error else Color(0xFFE53935),
+                                )
+                                VitalsPill(
+                                    icon = Icons.Default.Restaurant,
+                                    text = "$food/20",
+                                    tint = Color(0xFFFB8C00),
+                                )
+                                if (pingMs > 0) {
+                                    VitalsPill(
+                                        icon = Icons.Default.SignalCellularAlt,
+                                        text = "${pingMs}ms",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                if (versionName.isNotBlank()) {
+                                    VitalsPill(
+                                        icon = null,
+                                        text = versionName,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider()
+
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Row(
+                                Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            ) {
+                                Icon(
+                                    Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Column {
+                                    Text(
+                                        "AFK TIME",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        formatAfkTime(afkSeconds),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
+                            VerticalDivider(modifier = Modifier.height(36.dp))
+                            Row(
+                                Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            ) {
+                                Icon(
+                                    Icons.Default.DataUsage,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Column {
+                                    Text(
+                                        "DATA USED",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Text(
+                                        formatBytes(sessionData),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                    Text(
+                                        "↓${formatBytes(bytesIn)}  ↑${formatBytes(bytesOut)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    // Header group: title, status and detail stacked tightly
-                    // and centered. The gear overlays the top-right corner so
-                    // it never pushes the title off-center.
-                    Box(Modifier.fillMaxWidth()) {
-                        Column(
-                            Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Text(
-                                srv.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                textAlign = TextAlign.Center,
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(statusDotColor),
-                                )
-                                Text(
-                                    "Status: ${stateLabel(state)}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
+                    Button(
+                        onClick = {
+                            if (!AppGraph.startServer(ctx, srv)) {
+                                val cap = Prefs.maxBots(ctx)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Maximum $cap servers running (adjust in App settings)")
+                                }
                             }
-                            if (detail.isNotBlank()) {
-                                Text(
-                                    detail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                        }
-                        IconButton(
-                            onClick = { showSettings = true },
-                            modifier = Modifier.align(Alignment.TopEnd),
-                        ) {
-                            Icon(Icons.Default.Settings, contentDescription = "Server settings")
-                        }
-                    }
-                    HorizontalDivider()
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        },
+                        enabled = canStart,
                     ) {
-                        Row(
-                            Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                        ) {
-                            Icon(
-                                Icons.Default.Schedule,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Column {
-                                Text(
-                                    "AFK TIME",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    formatAfkTime(afkSeconds),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            }
-                        }
-                        VerticalDivider(modifier = Modifier.height(36.dp))
-                        Row(
-                            Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                        ) {
-                            Icon(
-                                Icons.Default.DataUsage,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Column {
-                                Text(
-                                    "DATA USED",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    formatBytes(sessionData),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                                Text(
-                                    "↓${formatBytes(bytesIn)}  ↑${formatBytes(bytesOut)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            }
-                        }
+                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        Text(" Start")
+                    }
+                    Button(
+                        onClick = { session.reconnect() },
+                        enabled = state != "disconnected",
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Reconnect now")
+                    }
+                    Button(
+                        onClick = { session.stop() },
+                        enabled = state != "disconnected",
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = null)
+                        Text(" Stop")
                     }
                 }
-            }
-
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = {
-                        if (activeCount >= EngineHost.MAX_BOTS) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Maximum ${EngineHost.MAX_BOTS} servers can run at the same time.")
-                            }
-                        } else {
-                            session.start(buildConfig(srv))
-                            ctx.startForegroundService(Intent(ctx, AfkService::class.java).setAction(AfkService.ACTION_START))
-                        }
-                    },
-                    enabled = canStart,
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Text(" Start")
-                }
-                Button(
-                    onClick = { session.reconnect() },
-                    enabled = state != "disconnected",
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reconnect now")
-                }
-                Button(
-                    onClick = { session.stop() },
-                    enabled = state != "disconnected",
-                ) {
-                    Icon(Icons.Default.Stop, contentDescription = null)
-                    Text(" Stop")
-                }
-            }
             }
         }
 
         server?.let { srvd ->
             if (showSettings) {
-                ServerSettingsDialog(
+                ServerSettingsSheet(
                     server = srvd,
                     session = session,
                     snackbarHostState = snackbarHostState,
+                    onOpenAccounts = {
+                        showSettings = false
+                        onOpenAccounts()
+                    },
                     onDismiss = { showSettings = false },
                 )
             }
@@ -1491,44 +1325,55 @@ private fun SessionScreen(
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = { showChat = false }) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Article,
-                        contentDescription = "Log",
-                        tint = if (!showChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = { showChat = false }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Article,
+                            contentDescription = "Log",
+                            tint = if (!showChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { showChat = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = "Chat",
+                            tint = if (showChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                IconButton(onClick = { showChat = true }) {
+                IconButton(onClick = { if (showChat) session.clearChat() else session.clearLogs() }) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = "Chat",
-                        tint = if (showChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        Icons.Default.CleaningServices,
+                        contentDescription = if (showChat) "Clear chat" else "Clear logs",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            // Chat tab = Column(fillMaxSize) { messages list (weight 1f);
-            // input row }. The ONE imePadding in this screen sits on the
-            // panel: the input always rests directly above the keyboard
-            // (gesture and 3-button nav alike), the list takes the rest, and
-            // with the keyboard closed the padding is 0 so the layout is
-            // exactly as before. No keyboard height is tracked manually.
             Card(
-                Modifier.fillMaxWidth().weight(1f).imePadding(),
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(bottom = 8.dp)
+                    .imePadding(),
             ) {
                 Column(Modifier.fillMaxSize().padding(12.dp)) {
                     Box(Modifier.fillMaxWidth().weight(1f)) {
                         LazyColumn(
                             Modifier.fillMaxSize(),
                             state = listState,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             if (showChat) {
                                 items(chat, key = { "${it.seq}:${it.ts}:${it.text.hashCode()}" }) { line ->
-                                    // Belt and suspenders with cleanSender():
-                                    // a system line must never render "<null>".
                                     val sender = line.sender?.takeIf { it != "null" }?.let { "<$it> " } ?: ""
-                                    val color = when (line.type) {
+                                    val prefix = if (showTimestamps) "[${timeFmt.format(Date(line.ts))}] " else ""
+                                    val baseColor = when (line.type) {
                                         "chat" -> MaterialTheme.colorScheme.onSurface
                                         "system" -> MaterialTheme.colorScheme.tertiary
                                         "whisper" -> MaterialTheme.colorScheme.secondary
@@ -1536,46 +1381,89 @@ private fun SessionScreen(
                                         "out" -> MaterialTheme.colorScheme.primary
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
+                                    val formatted = remember(line.styledText, prefix, sender, baseColor, isDark) {
+                                        formatMinecraftChat("$prefix$sender${line.styledText}", baseColor, isDark)
+                                    }
                                     Text(
-                                        "$sender${line.text}",
+                                        text = formatted,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontFamily = FontFamily.Monospace,
-                                        color = color,
+                                        color = baseColor,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                val cm = ctx.getSystemService(ClipboardManager::class.java)
+                                                cm.setPrimaryClip(ClipData.newPlainText("chat", line.text))
+                                                scope.launch { snackbarHostState.showSnackbar("Copied to clipboard") }
+                                            },
                                     )
                                 }
                             } else {
                                 items(logs, key = { it.id }) { line ->
+                                    val ts = if (showTimestamps) "[${timeFmt.format(Date(line.ts))}] " else ""
                                     Text(
-                                        line.text,
+                                        "$ts${line.text}",
                                         style = MaterialTheme.typography.bodySmall,
                                         fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                val cm = ctx.getSystemService(ClipboardManager::class.java)
+                                                cm.setPrimaryClip(ClipData.newPlainText("log", line.text))
+                                                scope.launch { snackbarHostState.showSnackbar("Copied to clipboard") }
+                                            },
                                     )
                                 }
                             }
                         }
                         if (!followNewest && itemCount > 0) {
-                            TextButton(
-                                onClick = {
-                                    followNewest = true
-                                    scope.launch { listState.scrollToItem(itemCount - 1) }
-                                },
-                                modifier = Modifier.align(Alignment.BottomCenter),
-                            ) { Text("Jump to latest") }
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        followNewest = true
+                                        scope.launch { listState.scrollToItem(itemCount - 1) }
+                                    },
+                                ) { Text("Jump to latest") }
+                            }
                         }
                     }
+
                     if (showChat) {
+                        val chips = remember(quickCommands, recentSent.toList()) {
+                            (recentSent + quickCommands).distinct().take(8)
+                        }
+                        if (chips.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                chips.forEach { cmd ->
+                                    AssistChip(
+                                        onClick = { sendText(cmd) },
+                                        label = { Text(cmd, style = MaterialTheme.typography.labelSmall) },
+                                    )
+                                }
+                            }
+                        }
                         Row(
                             verticalAlignment = Alignment.Bottom,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                         ) {
                             OutlinedTextField(
                                 value = chatInput,
                                 onValueChange = { chatInput = it },
                                 modifier = Modifier.weight(1f).focusRequester(chatFocusRequester),
-                                label = { Text("Type a message or /command") },
+                                label = { Text("Message or /command") },
                                 minLines = 1,
-                                maxLines = 5,
+                                maxLines = 4,
                                 keyboardOptions = KeyboardOptions(
                                     imeAction = ImeAction.Send,
                                     capitalization = KeyboardCapitalization.Sentences,
@@ -1600,24 +1488,26 @@ private fun SessionScreen(
             title = { Text("Finish sign-in") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Please sign in to your Microsoft account to verify this device, then return to the app.")
+                    Text("Sign in to your Microsoft account to verify this device, then return to the app.")
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Code: $code", style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace)
+                        Text(code, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
                         TextButton(onClick = {
                             val clipboard = ctx.getSystemService(ClipboardManager::class.java)
                             clipboard.setPrimaryClip(ClipData.newPlainText("device code", code))
-                        }) { Text("Copy code") }
+                        }) { Text("Copy") }
                     }
                     Text(url, style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
+                    val clipboard = ctx.getSystemService(ClipboardManager::class.java)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("device code", code))
                     ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                }) { Text("Open browser") }
+                }) { Text("Copy & Open") }
             },
             dismissButton = {
                 TextButton(onClick = { session.authRequired.value = null }) { Text("Done") }
@@ -1626,9 +1516,31 @@ private fun SessionScreen(
     }
 }
 
-/** One bottom-sheet row: a window slot plus collapsed duplicates (more). */
+@Composable
+private fun VitalsPill(icon: ImageVector?, text: String, tint: Color) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(13.dp), tint = tint)
+            }
+            Text(
+                text,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
 
-private fun formatAfkTime(totalSeconds: Long): String {    val h = totalSeconds / 3600
+private fun formatAfkTime(totalSeconds: Long): String {
+    val h = totalSeconds / 3600
     val m = (totalSeconds % 3600) / 60
     val s = totalSeconds % 60
     return "%02d:%02d:%02d".format(h, m, s)
@@ -1642,20 +1554,3 @@ private fun stateLabel(state: String): String = when (state) {
     "error" -> "Error"
     else -> "Disconnected"
 }
-
-private fun buildConfig(server: ServerEntity): String =
-    JSONObject()
-        .put("host", server.host)
-        .put("port", server.port)
-        .put("chatCommand", server.chatCommand.trim())
-        .put("commandDelaySeconds", if (server.commandDelaySeconds > 0) server.commandDelaySeconds else 5)
-        .put("auth", if (server.onlineMode) "microsoft" else "offline")
-        .put("username", server.username.ifBlank { "AFKBot" })
-        .put("viewDistance", server.viewDistance.coerceIn(2, 12))
-        .put("chatMode", if (server.chatMode in CALLABLE_CHAT_MODES) server.chatMode else "enabled")
-        .put("autoJump", server.autoJump)
-        .put("loopCommand", server.loopCommand)
-        .put("protocolOverride", server.protocolOverride.coerceIn(0, 1_000_000))
-        .toString()
-
-private val CALLABLE_CHAT_MODES = setOf("enabled", "commandsOnly", "messagesOnly", "hidden")

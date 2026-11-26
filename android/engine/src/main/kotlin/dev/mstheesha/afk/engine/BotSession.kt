@@ -37,6 +37,8 @@ internal class BotSession(
         private set
     var reconnectInMs = 0L
         private set
+    var pingMs = -1
+        private set
 
     /** Bumped whenever the bot is stopped/restarted; stale timers compare it. */
     var epoch = 0
@@ -45,6 +47,7 @@ internal class BotSession(
         private set
     @Volatile
     var auth: MicrosoftAuth? = null
+    private var authAccountKey = ""
     var authPending = false
 
     /** Authenticated Minecraft profile, resolved before the socket opens in online mode. */
@@ -71,8 +74,18 @@ internal class BotSession(
     private var lastInboundMs = 0L
     private var stopped = false
     private var timersScheduled = false
+    private var waitingForNetwork = false
+    private var deathNotified = false
+    private var antiAfkStep = 0
+    private var autoStopEpoch = 0
+    private var transferHost: String? = null
+    private var transferPort: Int = 0
+    private var isTransferConnect = false
+    private val triggerCooldowns = HashMap<Int, Long>()
     private var bytesInTotal = 0L
     private var bytesOutTotal = 0L
+    private var lastPublishedIn = -1L
+    private var lastPublishedOut = -1L
     private val logRing = LogRing(100)
     private val random = SecureRandom()
 
@@ -86,9 +99,23 @@ internal class BotSession(
         commandIndex = 0
         hasPosition = false
         timersScheduled = false
+        waitingForNetwork = false
+        deathNotified = false
+        transferHost = null
+        transferPort = 0
+        isTransferConnect = false
+        triggerCooldowns.clear()
         phase = Phase.CONNECTING
         detail = "Resolving"
+        scheduleAutoStop()
         publish()
+        if (!engine.isNetworkAvailable) {
+            waitingForNetwork = true
+            phase = Phase.RECONNECTING
+            detail = "Waiting for network…"
+            publish()
+            return
+        }
         engine.connect(this)
     }
 
@@ -96,6 +123,9 @@ internal class BotSession(
         if (stopped) return
         stopped = true
         epoch++
+        waitingForNetwork = false
+        transferHost = null
+        transferPort = 0
         closeConnection()
         phase = Phase.STOPPED
         detail = "Stopped"
@@ -106,11 +136,27 @@ internal class BotSession(
     fun update(newConfig: BotConfig) {
         val old = config
         config = newConfig
+        if (old.accountKey != newConfig.accountKey) {
+            auth = null
+            authAccountKey = ""
+        }
         if (old.chatMode != newConfig.chatMode) buildAllowlist()
-        if (!old.autoJump && newConfig.autoJump) scheduleJump()
+        if (old.chatMode != newConfig.chatMode || old.viewDistance != newConfig.viewDistance) {
+            conn?.let { c ->
+                if (c.state == ConnState.PLAY || c.state == ConnState.CONFIG) {
+                    sendSettings(c)
+                }
+            }
+        }
+        if (old.effectiveAntiAfk() == AntiAfkMode.OFF && newConfig.effectiveAntiAfk() != AntiAfkMode.OFF) {
+            scheduleAntiAfk()
+        }
         if (old.commands != newConfig.commands || old.loopCommand != newConfig.loopCommand) {
             commandIndex = 0
             if (newConfig.commands.isNotEmpty() && phase == Phase.PLAYING) scheduleCommand(1_000)
+        }
+        if (old.autoStopMinutes != newConfig.autoStopMinutes) {
+            scheduleAutoStop()
         }
         publish()
     }
@@ -122,14 +168,44 @@ internal class BotSession(
         start()
     }
 
-    /** Shared Microsoft session; created once and reused across reconnects. */
+    fun onNetworkState(available: Boolean) {
+        if (stopped) return
+        if (!available) {
+            if (phase == Phase.RECONNECTING || phase == Phase.CONNECTING) {
+                waitingForNetwork = true
+                detail = "Waiting for network…"
+                reconnectInMs = 0
+                publish()
+            }
+        } else if (waitingForNetwork || phase == Phase.RECONNECTING) {
+            waitingForNetwork = false
+            backoffMs = 2_000L
+            epoch++
+            closeConnection()
+            phase = Phase.CONNECTING
+            detail = "Network restored; reconnecting"
+            reconnectInMs = 0
+            publish()
+            engine.connect(this)
+        }
+    }
+
+    fun shrinkBuffers() {
+        conn?.shrinkBuffers()
+        logRing.shrink()
+    }
+
+    /** Shared Microsoft session; created once per accountKey and reused across reconnects. */
     @Synchronized
     fun authSession(): MicrosoftAuth {
-        auth?.let { return it }
-        val created = MicrosoftAuth(engine.tokenStore) { url, code ->
+        val key = config.accountKey.ifBlank { "default" }
+        val existing = auth
+        if (existing != null && authAccountKey == key) return existing
+        val created = MicrosoftAuth(engine.tokenStore, key) { url, code ->
             engine.notifyAuthCode(this, url, code)
         }
         auth = created
+        authAccountKey = key
         return created
     }
 
@@ -148,29 +224,35 @@ internal class BotSession(
 
     // ---------------------------------------------------------------- transport
 
-    fun onConnected(channel: SocketChannel, protocol: Int, version: String) {
+    fun onConnected(channel: SocketChannel, protocol: Int, version: String, latencyMs: Int = -1) {
         this.protocol = protocol
+        if (latencyMs > 0) this.pingMs = latencyMs
         this.versionName = version.ifBlank {
             PacketTable.forProtocol(protocol)?.version ?: "protocol $protocol"
         }
         table = PacketTable.forProtocol(protocol)
         buildAllowlist()
         configFrames = 0
-        val c = Connection(channel, this)
+        deathNotified = false
+        val c = Connection(channel, this, engine.scratch)
         conn = c
         lastInboundMs = System.currentTimeMillis()
+        val dialHost = transferHost ?: config.host
+        val dialPort = if (transferPort in 1..65535) transferPort else config.port
+        val intent = if (isTransferConnect && protocol >= 766) 3 else 2
+        isTransferConnect = false
         c.state = ConnState.HANDSHAKE
         c.send(id(P.HANDSHAKE_C2S_SET_PROTOCOL)) {
             it.writeVarInt(protocol)
-            it.writeString(config.host)
-            it.writeShort(config.port)
-            it.writeVarInt(2) // login
+            it.writeString(dialHost)
+            it.writeShort(dialPort)
+            it.writeVarInt(intent) // 2 = login, 3 = transfer (1.20.5+)
         }
         c.state = ConnState.LOGIN
         sendLoginStart(c)
         phase = Phase.LOGGING_IN
         detail = versionName
-        log("Connecting to ${config.host}:${config.port} as ${loginName()} ($versionName)")
+        log("Connecting to $dialHost:$dialPort as ${loginName()} ($versionName)")
         publish()
         // A peer that accepts TCP and then goes silent must not leave the bot
         // "Connecting" until the OS keep-alive fires hours later.
@@ -360,13 +442,19 @@ internal class BotSession(
     private fun sendSettings(c: Connection) {
         val slot = if (c.state == ConnState.CONFIG) P.CONFIG_C2S_SETTINGS else P.PLAY_C2S_SETTINGS
         if (!has(slot)) return
+        // Tell the server itself not to send chat we don't want, saving bandwidth + CPU.
+        val wireChatMode = when (config.chatMode) {
+            ChatMode.HIDDEN -> 2
+            ChatMode.COMMANDS_ONLY -> 1
+            ChatMode.ALL, ChatMode.MESSAGES_ONLY -> 0
+        }
         c.send(id(slot)) {
             it.writeString("en_US")
             it.writeByte(config.viewDistance.coerceIn(2, 16))
             if (protocol < 107) {
-                it.writeByte(0) // chat flags
+                it.writeByte(wireChatMode) // chat flags
             } else {
-                it.writeVarInt(0)
+                it.writeVarInt(wireChatMode)
             }
             it.writeBoolean(true) // chat colors
             it.writeByte(0x7F) // all skin parts
@@ -375,7 +463,7 @@ internal class BotSession(
                 it.writeBoolean(false) // text filtering
                 it.writeBoolean(true) // server listing
             }
-            if (protocol >= 768) it.writeVarInt(0) // particle status: all
+            if (protocol >= 768) it.writeVarInt(2) // particle status: minimal
         }
     }
 
@@ -402,6 +490,17 @@ internal class BotSession(
             it.writeDouble(x)
             it.writeDouble(y)
             it.writeDouble(z)
+            if (protocol >= 768) it.writeByte(if (onGround) 1 else 0)
+            else it.writeBoolean(onGround)
+        }
+    }
+
+    private fun sendLook(yaw: Float, pitch: Float, onGround: Boolean) {
+        val c = conn ?: return
+        if (c.state != ConnState.PLAY || !has(P.PLAY_C2S_LOOK)) return
+        c.send(id(P.PLAY_C2S_LOOK)) {
+            it.writeFloat(yaw)
+            it.writeFloat(pitch)
             if (protocol >= 768) it.writeByte(if (onGround) 1 else 0)
             else it.writeBoolean(onGround)
         }
@@ -542,9 +641,7 @@ internal class BotSession(
     }
 
     private fun handleConfig(c: Connection, packetId: Int, r: PacketReader) {
-        // Registry data is the bulk of the config phase; log the interesting
-        // packets only so the ring stays readable.
-        if (configFrames < 8 && packetId != id(P.CONFIG_S2C_REGISTRY_DATA)) {
+        if (configFrames < 8) {
             configFrames++
             log("Config packet id=$packetId len=${r.remaining()}")
         }
@@ -590,6 +687,7 @@ internal class BotSession(
                 }
             }
             id(P.CONFIG_S2C_RESOURCE_PACK) -> acceptResourcePack(c, r, true)
+            id(P.CONFIG_S2C_TRANSFER) -> handleTransfer(r)
             id(P.CONFIG_S2C_CODE_OF_CONDUCT) -> {
                 if (has(P.CONFIG_C2S_ACCEPT_CODE_OF_CONDUCT)) {
                     c.send(id(P.CONFIG_C2S_ACCEPT_CODE_OF_CONDUCT))
@@ -616,6 +714,7 @@ internal class BotSession(
                 phase = Phase.PLAYING
                 detail = "In game"
                 connected = true
+                deathNotified = false
                 commandIndex = 0
                 scheduleCommand(1_500)
                 publish()
@@ -625,16 +724,22 @@ internal class BotSession(
             id(P.PLAY_S2C_UPDATE_HEALTH) -> {
                 health = r.readFloat()
                 food = r.readVarInt()
+                if (health > 0f) deathNotified = false
                 publish()
-            }
-            id(P.PLAY_S2C_DEATH_COMBAT) -> {
-                val e = epoch
-                engine.schedule(this, 1_000) {
-                    if (epoch == e && phase == Phase.PLAYING && has(P.PLAY_C2S_CLIENT_COMMAND)) {
-                        conn?.send(id(P.PLAY_C2S_CLIENT_COMMAND)) { it.writeVarInt(0) }
-                    }
+                if (health <= 0f) {
+                    handleDeath()
+                } else if (config.lowHealthDisconnect > 0f && health <= config.lowHealthDisconnect) {
+                    val hearts = String.format(java.util.Locale.US, "%.1f", health / 2f)
+                    val msg = "Low health ($hearts hearts) — disconnected for safety"
+                    log(msg)
+                    stopWithReason(msg)
+                    emitEvent(BotEventKind.LOW_HEALTH, msg)
                 }
             }
+            id(P.PLAY_S2C_RESPAWN) -> {
+                deathNotified = false
+            }
+            id(P.PLAY_S2C_DEATH_COMBAT) -> handleDeath()
             id(P.PLAY_S2C_PING) -> {
                 val value = r.readInt()
                 if (has(P.PLAY_C2S_PONG)) {
@@ -642,6 +747,7 @@ internal class BotSession(
                 }
             }
             id(P.PLAY_S2C_RESOURCE_PACK) -> acceptResourcePack(c, r, false)
+            id(P.PLAY_S2C_TRANSFER) -> handleTransfer(r)
             id(P.PLAY_S2C_START_CONFIGURATION) -> {
                 if (has(P.PLAY_C2S_CONFIGURATION_ACK)) {
                     c.send(id(P.PLAY_C2S_CONFIGURATION_ACK))
@@ -657,6 +763,42 @@ internal class BotSession(
             id(P.PLAY_S2C_DISGUISED_CHAT) -> handleDisguisedChat(r)
             else -> Unit
         }
+    }
+
+    private fun handleDeath() {
+        if (deathNotified || stopped) return
+        deathNotified = true
+        log("Bot died")
+        emitEvent(BotEventKind.DIED, "Bot died on ${config.host}")
+        if (!config.autoRespawn) {
+            stopWithReason("Bot died (auto-respawn off)")
+            return
+        }
+        val e = epoch
+        engine.schedule(this, 1_000) {
+            if (epoch == e && phase == Phase.PLAYING && has(P.PLAY_C2S_CLIENT_COMMAND)) {
+                conn?.send(id(P.PLAY_C2S_CLIENT_COMMAND)) { it.writeVarInt(0) }
+            }
+        }
+    }
+
+    private fun handleTransfer(r: PacketReader) {
+        val host = r.readString(1 shl 10).trim()
+        val port = r.readVarInt().coerceIn(1, 65535)
+        if (host.isBlank()) return
+        log("Server transfer to $host:$port")
+        emitEvent(BotEventKind.TRANSFERRED, "Transferred to $host:$port")
+        epoch++
+        closeConnection()
+        transferHost = host
+        transferPort = port
+        isTransferConnect = true
+        connected = false
+        timersScheduled = false
+        phase = Phase.CONNECTING
+        detail = "Transferring to $host:$port"
+        publish()
+        engine.connect(this, host, port)
     }
 
     private fun handlePosition(c: Connection, r: PacketReader) {
@@ -720,7 +862,9 @@ internal class BotSession(
     private fun handlePlayerChat(r: PacketReader) {
         if (protocol < 759) {
             // Pre-1.19 chat packet: JSON + position (0 chat, 1 system, 2 action bar).
-            val text = ChatText.fromJson(r.readString(1 shl 20))
+            val rawJson = r.readString(1 shl 20)
+            val styled = ChatText.fromJsonStyled(rawJson)
+            val text = ChatText.stripFormatting(styled)
             val position = r.readByte().toInt()
             when (config.chatMode) {
                 ChatMode.COMMANDS_ONLY -> if (position != 1) return
@@ -728,12 +872,13 @@ internal class BotSession(
                 ChatMode.HIDDEN -> return
                 ChatMode.ALL -> Unit
             }
-            if (text.isNotBlank()) emitChat(if (position == 0) "chat" else "system", null, text)
+            if (text.isNotBlank()) emitChat(if (position == 0) "chat" else "system", null, text, styled)
             return
         }
-        val text = parsePlayerChat(r)
+        val raw = parsePlayerChat(r)
+        val text = ChatText.stripFormatting(raw)
         if (text.isBlank() || config.chatMode == ChatMode.COMMANDS_ONLY) return
-        emitChat("chat", null, text)
+        emitChat("chat", null, text, raw)
     }
 
     private fun parsePlayerChat(r: PacketReader): String = when {
@@ -765,40 +910,67 @@ internal class BotSession(
     }
 
     private fun handleSystemChat(r: PacketReader) {
-        val text = when {
+        val styled = when {
             protocol == 759 -> {
                 val json = r.readString(1 shl 20)
                 r.readVarInt() // chat type
-                ChatText.fromJson(json)
+                ChatText.fromJsonStyled(json)
             }
-            Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbt(r, false)
-            else -> ChatText.fromJson(r.readString(1 shl 20))
+            Protocol.textComponentsAreNbt(protocol) -> ChatText.fromNbtStyled(r, false)
+            else -> ChatText.fromJsonStyled(r.readString(1 shl 20))
         }
+        val text = ChatText.stripFormatting(styled)
         if (config.chatMode == ChatMode.MESSAGES_ONLY || config.chatMode == ChatMode.HIDDEN) return
-        emitChat("system", null, text)
+        if (text.isNotBlank()) emitChat("system", null, text, styled)
     }
 
     private fun handleDisguisedChat(r: PacketReader) {
         if (config.chatMode == ChatMode.COMMANDS_ONLY || config.chatMode == ChatMode.HIDDEN) return
-        val text: String
+        val styled: String
         val sender: String?
         if (Protocol.textComponentsAreNbt(protocol)) {
-            text = ChatText.fromNbt(r, false)
+            styled = ChatText.fromNbtStyled(r, false)
             r.readVarInt()
             sender = ChatText.fromNbt(r, false)
         } else {
-            text = ChatText.fromJson(r.readString(1 shl 20))
+            styled = ChatText.fromJsonStyled(r.readString(1 shl 20))
             r.readVarInt()
             sender = ChatText.fromJson(r.readString(1 shl 20))
         }
-        if (text.isNotBlank()) emitChat("chat", sender.ifBlank { null }, text)
+        val text = ChatText.stripFormatting(styled)
+        if (text.isNotBlank()) emitChat("chat", sender.ifBlank { null }, text, styled)
     }
 
-    private fun emitChat(type: String, sender: String?, text: String) {
-        val line = ChatLine(++chatSeq, System.currentTimeMillis(), type, sender, text)
+    private fun emitChat(type: String, sender: String?, text: String, styled: String = text) {
+        val line = ChatLine(++chatSeq, System.currentTimeMillis(), type, sender, text, styled)
         try {
             listener.onChat(line)
         } catch (_: Exception) {
+        }
+        evaluateChatTriggers(text)
+    }
+
+    private fun evaluateChatTriggers(text: String) {
+        val triggers = config.chatTriggers
+        if (triggers.isEmpty() || phase != Phase.PLAYING) return
+        val now = System.currentTimeMillis()
+        for ((index, trigger) in triggers.withIndex()) {
+            val match = trigger.match.trim()
+            val cmd = trigger.command.trim()
+            if (match.isEmpty() || cmd.isEmpty()) continue
+            if (!text.contains(match, ignoreCase = true)) continue
+            val lastFired = triggerCooldowns[index] ?: 0L
+            if (now - lastFired < 5_000L) continue
+            triggerCooldowns[index] = now
+            val e = epoch
+            val delayMs = trigger.delaySeconds.coerceIn(0, 120) * 1_000L
+            if (delayMs == 0L) {
+                sendChat(cmd)
+            } else {
+                engine.schedule(this, delayMs) {
+                    if (epoch == e && !stopped && phase == Phase.PLAYING) sendChat(cmd)
+                }
+            }
         }
     }
 
@@ -859,17 +1031,27 @@ internal class BotSession(
         connected = false
         val lower = text.lowercase()
         if (BAN_MARKERS.any { lower.contains(it) }) {
-            stopped = true
-            epoch++
-            closeConnection()
-            phase = Phase.STOPPED
-            detail = text.take(200)
-            publish()
-            engine.notifyStopped(this)
+            emitEvent(BotEventKind.BANNED, text)
+            stopWithReason(text)
             return
         }
+        emitEvent(BotEventKind.KICKED, text)
         val rateLimited = RATE_LIMIT_MARKERS.any { lower.contains(it) }
         scheduleReconnect(text, if (rateLimited) 60_000L else -1L)
+    }
+
+    private fun stopWithReason(reason: String) {
+        stopped = true
+        epoch++
+        waitingForNetwork = false
+        transferHost = null
+        transferPort = 0
+        closeConnection()
+        phase = Phase.STOPPED
+        detail = reason.take(200)
+        connected = false
+        publish()
+        engine.notifyStopped(this)
     }
 
     private fun scheduleReconnect(reason: String, fixedDelay: Long = -1L) {
@@ -879,6 +1061,15 @@ internal class BotSession(
         phase = Phase.RECONNECTING
         detail = reason.take(160)
         connected = false
+        transferHost = null
+        transferPort = 0
+        if (!engine.isNetworkAvailable) {
+            waitingForNetwork = true
+            reconnectInMs = 0
+            detail = "Waiting for network…"
+            publish()
+            return
+        }
         val delay = if (fixedDelay > 0) fixedDelay else backoffMs
         backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
         reconnectInMs = delay
@@ -886,6 +1077,13 @@ internal class BotSession(
         val e = epoch
         engine.schedule(this, delay) {
             if (epoch == e && !stopped) {
+                if (!engine.isNetworkAvailable) {
+                    waitingForNetwork = true
+                    reconnectInMs = 0
+                    detail = "Waiting for network…"
+                    publish()
+                    return@schedule
+                }
                 reconnectInMs = 0
                 phase = Phase.CONNECTING
                 detail = "Reconnecting"
@@ -918,7 +1116,9 @@ internal class BotSession(
                 engine.schedule(this, 30_000) { if (epoch == e) checkTimeoutLoop() }
             }
         }
-        scheduleJump()
+        if (config.effectiveAntiAfk() != AntiAfkMode.OFF) {
+            scheduleAntiAfk()
+        }
     }
 
     private fun checkTimeoutLoop() {
@@ -928,29 +1128,69 @@ internal class BotSession(
         engine.schedule(this, 30_000) { if (epoch == e) checkTimeoutLoop() }
     }
 
-    private fun scheduleJump() {
+    private fun scheduleAntiAfk() {
         if (stopped) return
+        val mode = config.effectiveAntiAfk()
+        if (mode == AntiAfkMode.OFF) return
         val e = epoch
-        engine.schedule(this, 15_000) {
+        // Human-like jitter (20–40 s) so anti-AFK plugins don't flag a fixed clock.
+        val delayMs = 20_000L + random.nextInt(20_001).toLong()
+        engine.schedule(this, delayMs) {
             if (epoch != e || stopped) return@schedule
-            if (!config.autoJump || phase != Phase.PLAYING) {
-                scheduleJump()
+            val activeMode = config.effectiveAntiAfk()
+            if (activeMode == AntiAfkMode.OFF) return@schedule
+            if (phase != Phase.PLAYING) {
+                scheduleAntiAfk()
                 return@schedule
             }
-            if (hasPosition) {
-                sendPosition(lastX, lastY + 0.42, lastZ, false)
-                engine.schedule(this, 350) {
-                    if (epoch == e && phase == Phase.PLAYING) {
-                        sendPosition(lastX, lastY, lastZ, true)
+            val doJump = when (activeMode) {
+                AntiAfkMode.JUMP -> true
+                AntiAfkMode.LOOK -> false
+                AntiAfkMode.MIX -> (antiAfkStep++ and 1) == 0
+                AntiAfkMode.OFF -> return@schedule
+            }
+            if (doJump) {
+                if (hasPosition) {
+                    sendPosition(lastX, lastY + 0.42, lastZ, false)
+                    engine.schedule(this, 350) {
+                        if (epoch == e && phase == Phase.PLAYING) {
+                            sendPosition(lastX, lastY, lastZ, true)
+                        }
+                    }
+                } else {
+                    sendFlying(false)
+                    engine.schedule(this, 350) {
+                        if (epoch == e && phase == Phase.PLAYING) sendFlying(true)
                     }
                 }
             } else {
-                sendFlying(false)
-                engine.schedule(this, 350) {
-                    if (epoch == e && phase == Phase.PLAYING) sendFlying(true)
+                val deltaYaw = (random.nextInt(31) - 15).toFloat()
+                val deltaPitch = (random.nextInt(13) - 6).toFloat()
+                val targetYaw = lastYaw + deltaYaw
+                val targetPitch = (lastPitch + deltaPitch).coerceIn(-85f, 85f)
+                sendLook(targetYaw, targetPitch, true)
+                engine.schedule(this, 500) {
+                    if (epoch == e && phase == Phase.PLAYING) {
+                        sendLook(lastYaw, lastPitch, true)
+                    }
                 }
             }
-            scheduleJump()
+            scheduleAntiAfk()
+        }
+    }
+
+    private fun scheduleAutoStop() {
+        val mins = config.autoStopMinutes
+        if (stopped || mins <= 0) return
+        val stopToken = ++autoStopEpoch
+        val e = epoch
+        engine.schedule(this, mins * 60_000L) {
+            if (!stopped && epoch == e && autoStopEpoch == stopToken) {
+                val msg = "Auto-stop timer reached (${mins}m)"
+                log(msg)
+                emitEvent(BotEventKind.AUTO_STOPPED, msg)
+                stopWithReason(msg)
+            }
         }
     }
 
@@ -991,18 +1231,16 @@ internal class BotSession(
             P.LOGIN_S2C_COOKIE_REQUEST,
         )) mark(ConnState.LOGIN, slot)
 
+        // Slim CONFIG allowlist: omits REGISTRY_DATA, FEATURE_FLAGS, etc., so
+        // two-stage partial inflate skips megabytes of registry NBT on join.
         for (slot in intArrayOf(
             P.CONFIG_S2C_DISCONNECT,
             P.CONFIG_S2C_FINISH,
             P.CONFIG_S2C_KEEP_ALIVE,
             P.CONFIG_S2C_PING,
-            P.CONFIG_S2C_CUSTOM_PAYLOAD,
             P.CONFIG_S2C_RESOURCE_PACK,
-            P.CONFIG_S2C_REMOVE_RESOURCE_PACK,
             P.CONFIG_S2C_COOKIE_REQUEST,
             P.CONFIG_S2C_TRANSFER,
-            P.CONFIG_S2C_REGISTRY_DATA,
-            P.CONFIG_S2C_FEATURE_FLAGS,
             P.CONFIG_S2C_SELECT_KNOWN_PACKS,
             P.CONFIG_S2C_CODE_OF_CONDUCT,
         )) mark(ConnState.CONFIG, slot)
@@ -1017,11 +1255,9 @@ internal class BotSession(
             P.PLAY_S2C_DEATH_COMBAT,
             P.PLAY_S2C_PING,
             P.PLAY_S2C_RESOURCE_PACK,
-            P.PLAY_S2C_REMOVE_RESOURCE_PACK,
             P.PLAY_S2C_COOKIE_REQUEST,
             P.PLAY_S2C_TRANSFER,
             P.PLAY_S2C_START_CONFIGURATION,
-            P.PLAY_S2C_CHUNK_BATCH_START,
         )) mark(ConnState.PLAY, slot)
 
         val mode = config.chatMode
@@ -1044,6 +1280,8 @@ internal class BotSession(
             bytesInTotal = c.bytesIn
             bytesOutTotal = c.bytesOut
         }
+        lastPublishedIn = bytesInTotal
+        lastPublishedOut = bytesOutTotal
         return BotSnapshot(
             phase = phase,
             detail = detail,
@@ -1057,13 +1295,26 @@ internal class BotSession(
             food = food,
             kicks = kicks,
             reconnectInMs = reconnectInMs,
+            pingMs = pingMs,
         )
     }
 
     private fun publish() = engine.publish(id, snapshot())
 
-    /** Called by the engine's 1 s tick so byte counters stay fresh. */
-    internal fun pushNow() = publish()
+    /** Called by the engine's 1 s tick only while UI is visible; skips if byte counters didn't move. */
+    internal fun pushIfDirty() {
+        val c = conn ?: return
+        if (c.bytesIn != lastPublishedIn || c.bytesOut != lastPublishedOut) {
+            publish()
+        }
+    }
+
+    private fun emitEvent(kind: BotEventKind, message: String) {
+        try {
+            listener.onEvent(BotEvent(kind, message))
+        } catch (_: Exception) {
+        }
+    }
 
     private fun log(line: String) {
         logRing.add(line)
